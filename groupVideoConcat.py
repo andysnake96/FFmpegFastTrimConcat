@@ -50,7 +50,7 @@ FFmpegNvidiaAwareDecode=" -vsync 0 -hwaccel cuvid -c:v h264_cuvid "
 FFmpegNvidiaAwareEncode=" -c:v h264_nvenc "
 FFmpegNvidiaAwareEncode+=" -preset fast -coder vlc "
 FFmpegDbg=" -hide_banner -y -loglevel 'verbose' "
-FFmpegNvidiaAwareBuildPath="~/ffmpeg/bin/ffmpeg_nv "+FFmpegDbg
+FFmpegNvidiaAwareBuildPath="/home/andysnake/ffmpeg/bin/nv/ffmpeg_g "+FFmpegDbg
 FFmpegBasePath="~/ffmpeg/bin/ffmpeg "
 FFMPEG=FFmpegNvidiaAwareBuildPath
 ## copy->nvenc  -c:v h264_nvenc -preset fast -coder vlc 
@@ -248,40 +248,47 @@ buildFFMPEG_segExtract_reencode=lambda pathName,segStart,segTo,destPath: FFMPEG+
 
 BASH_NEWLINE_CONTINUE="\\\n"
 MULTILINE_OUT=True
-def concatFilterCmd(itemSegsList,outFname="out.mp4",seekSegs=True,ONTHEFLY_PIPE=True,PIPE_FORMAT="matroska"):
+def concatFilterCmd(items,outFname="/tmp/out.mp4",ONTHEFLY_PIPE=True,PIPE_FORMAT="matroska",HwDecoding=False):
     """
-    generate ffmpeg concat filter cmd string, to concat itemSegsList specified segments
-    if seekSegs False input items will be concatenated without seek
-    itemSegsList: [(itemObj,[(seg0Start,seg0End),...]),...]  IF seekSeg=True
-    itemSegsList: list of paths of  segs pre computed
+    generate ffmpeg concat filter cmd string, to concat items specified segments
+    items: list of vids path to concat 
     optional output to a pipe to ffplay ( ffmpeg ... - | ffplay -) can be selected with ONTHEFLY_PIPE and PIPE_FORMAT
+    HwDecoding: flag to enable hw decoding on each vid
     """
     outStrCmd=FFMPEG
-    inputFileSeekedList=list()  # list of subStr for input file segmentized by -ss-to
-    numInputs=len(itemSegsList)
-    if seekSegs:
-        for item,segs in itemSegsList: #filePath0,[segs...]
-            for seg in segs:
-                inputFileSeekedList.append("\t-ss "+str(seg[0])+" -to "+str(seg[1])+" -i '"+item.pathName+"'\t")
-                #if MULTILINE_OUT: outStrCmd+='\\'+'\n'           #multiline cmd
-    else:
-        for item in itemSegsList: inputFileSeekedList.append(" -i '"+item+"'")
-    shuffle(inputFileSeekedList)    #shuf segment list as input operand
-    prfx=BASH_NEWLINE_CONTINUE+Decode
-    inputBlock=prfx+ prfx.join(inputFileSeekedList) #join in segment shuffled with as prefix \+\n and eventual Decode option
+    inputsFiles=list()  # list of input lines
+    numInputs=len(items)
+    for itemPath in items:
+        itemLine=" -i '"+itemPath+"'\t"
+        inputsFiles.append(itemLine)
+    shuffle(inputsFiles)            #shuf segment list as input operand
+    prfx=BASH_NEWLINE_CONTINUE
+    if HwDecoding: prfx+=Decode     #HW decoding for each input vid
+    inputBlock=prfx+ prfx.join(inputsFiles) #join in segment shuffled with as prefix \+\n and eventual Decode option
     outStrCmd+=inputBlock+BASH_NEWLINE_CONTINUE
     # gen concat filter streams string [1][2]..
     concatFilterInStreamsString=""
     for x in range(numInputs): concatFilterInStreamsString+="["+str(x)+"]"
     outStrCmd+=' -filter_complex "'+concatFilterInStreamsString+"concat=n="+str(numInputs)+':v=1:a=1"'
-    outStrCmd+=" -vsync 2"
+    outStrCmd+=" -vsync drop"      
     targetOutput=" "+outFname
     outStrCmd+=Encode
     if ONTHEFLY_PIPE: targetOutput=" -f "+PIPE_FORMAT+" - | ffplay - " #on the fly generate and play with ffplay
     outStrCmd+=targetOutput
     return outStrCmd
+def FFmpegConcatFilter(itemsList,outScriptFname,onTheFlayFFPlay=False):
+    """
+    concat itemsList of MultimediaItems with ffmpeg concat filter
+    """
+    itemsPaths=[i.pathName for i in itemsList]
+    print(itemsList,itemsPaths)
+    outFp=open(outScriptFname,"w")
+    ffmpegConcatFilterCmd=concatFilterCmd(itemsPaths,ONTHEFLY_PIPE=onTheFlayFFPlay)
+    outFp.write(ffmpegConcatFilterCmd)
+    outFp.close()
 
-def FFmpegConcatFlexible(itemsList, SEG_BUILD_METHOD=buildFFMPEG_segExtractNoReencode,segGenConfig=None,**opts):
+
+def FFmpegTrimConcatFlexible(itemsList, SEG_BUILD_METHOD=buildFFMPEG_segExtractNoReencode,segGenConfig=None,**opts):
     """
         support cutting segments from videos in itemsList and later merging back by generation of ffmpeg bash scripts
         SEG_BUILD_METHOD is the function used to gen the video segment in the BASH_BATCH_SEGS_GEN script
@@ -353,7 +360,7 @@ def FFmpegConcatFlexible(itemsList, SEG_BUILD_METHOD=buildFFMPEG_segExtractNoRee
     file.close()
     if "CONCAT_FILTER_FILE" in opts:
         concatFilterFile=opts["CONCAT_FILTER_FILE"]
-        concatStr=concatFilterCmd(trgtSegsList,seekSegs=False,ONTHEFLY_PIPE=False)
+        concatStr=concatFilterCmd(trgtSegsList,ONTHEFLY_PIPE=False)
         concatBashSegs=open(concatFilterFile,"w")
         concatBashSegs.write(concatStr)
         concatBashSegs.close()
@@ -363,10 +370,19 @@ def FFmpegConcatFlexible(itemsList, SEG_BUILD_METHOD=buildFFMPEG_segExtractNoRee
 #TARGETS SELECTION OPTIONS
 TAKE_ALL_MOST_POPOLOUS="TAKE_ALL_MOST_POPOLOUS"
 GUI_TUMBNAIL_GROUPS_SELECT="GUI_TUMBNAIL_GROUPS_SELECT"
+GUI_GROUPS_SELECT="GUI_GROUPS_SELECT"
 ITERATIVE_PLAY_CONFIRM="ITERATIVE_PLAY_CONFIRM"
 def _select_items_group(items,keyGroup):
     global SelectedGroupK
     SelectedGroupK=keyGroup
+
+#GROUP KEYS--------------------------
+GroupKeys=["width","height","sample_aspect_ratio"]
+#groupKeys=["duration"]
+#ECLUDE KEYS-------------------------
+#excludeGroupKeys=["bit_rate","nb_frames","tags","disposition","avg_frame_rate","color","index"]
+ExcludeGroupKeys=["duration","bit_rate","nb_frames","tags","disposition","has_b_frame","avg_frame_rate","color"]
+#excludeGroupKeys=["rate","tags","disposition","color","index","refs"]
 
 def argParseMinimal(args):
     #minimal arg parse use to parse optional args
@@ -377,10 +393,12 @@ def argParseMinimal(args):
     parser.add_argument("--segsLenSecMax",type=int,default=None,help="")
     parser.add_argument("--segsLenSecMin",type=int,default=None,help="")
     parser.add_argument("--maxSegN",type=int,default=None,help="")
-    parser.add_argument("--groupSelectionMode",type=str,choices=["GUI_TUMBNAIL_GROUPS_SELECT","ITERATIVE_PLAY_CONFIRM","TAKE_ALL_MOST_POPOLOUS"],default="GUI_TUMBNAIL_GROUPS_SELECT",help="mode of selecting groups to concat")
+    parser.add_argument("--groupSelectionMode",type=str,choices=["GUI_TUMBNAIL_GROUPS_SELECT","ITERATIVE_PLAY_CONFIRM","TAKE_ALL_MOST_POPOLOUS","GUI_GROUPS_SELECT"],default="GUI_TUMBNAIL_GROUPS_SELECT",help="mode of selecting groups to concat")
+    #parser.add_argument("--grouppingRule",type=str,default=ffmpegConcatDemuxerGroupping.__name__,choices=list(GrouppingFunctions.keys()),help="groupping mode of items")
     parser.add_argument("--concurrencyLev",type=int,default=2,help="concurrency in cutting operation (override env CONCURRENCY_LEVEL_FFMPEG_BUILD_SEGS)")
     parser.add_argument("--parseSelectionFile",type=str,default=None,help="set serialized file  videos metadata and eventual cutPoint times to group and merge with the standard  scan")
     parser.add_argument("--groupDirect",type=bool,default=False,help="group metadata founded by direct groupping keys embedded in code")
+    parser.add_argument("--justFFmpegConcatFilter",type=bool,default=False,help="concat selected items with ffmpeg's concat filter")
     parser.add_argument("--justMetadata",type=bool,default=False,help="pathname is not mandatory to be founded during item scan")
     parser.add_argument("--genGroupFilenames",type=int,choices=[0,1,2],default=0,help="gen newline separated list of file paths for each founded group: 0=OFF,1=ON,2=JUST GEN groupFnames, no segmentation")
     return parser.parse_args(args)
@@ -418,24 +436,18 @@ if __name__=="__main__":
         if v.metadata!="" and ( nsArgParsed.justMetadata or v.pathName!=""):    itemsToGroup.append(v)
     if len(itemsToGroup)==0: raise Exception("NOT FOUNDED COMPATIBLE VIDEOS AT "+str(startPath))
     ####### GROUP VIDEOS BY COMMON PARAMS IN METADATA
-    # either group by common defined fields (groupKeys) or by all field but few defined (excludeGroupKeys)
-    #GROUP KEYS--------------------------
-    groupKeys=["width","height"]
-    #groupKeys=["duration"]
-    #ECLUDE KEYS-------------------------
-    #excludeGroupKeys=["bit_rate","nb_frames","tags","disposition","avg_frame_rate","color","index"]
-    excludeGroupKeys=["duration","bit_rate","nb_frames","tags","disposition","avg_frame_rate","color"]
-    #excludeGroupKeys=["rate","tags","disposition","color","index","refs"]
+    # either group by common defined fields (GroupKeys) or by all field but few defined (ExcludeGroupKeys)
+    
     ############### ACTUAL GROUPPING    #############################
 
     ##TOGLE NEXT 2 PAIR OF  LINES FOR GROUPPING BY FEW FIELDS (concatFilter) or almost all fields (concatDemuxer)
     # excludeOnKeyList,excludeWildcard=False,True
     # groupByFields=groupKeys
     excludeOnKeyList,excludeWildcard=True,True
-    groupByFields=excludeGroupKeys
+    groupByFields=ExcludeGroupKeys
     if nsArgParsed.groupDirect: #overwrite dflt on arg -> group by groupKeys without excludsion
         excludeOnKeyList,excludeWildcard=False,False
-        groupByFields=groupKeys
+        groupByFields=GroupKeys
     grouppings=FlexibleGroupByFields(itemsToGroup, groupByFields, EXCLUDE_ON_KEYLIST=excludeOnKeyList, EXCLUDE_WILDCARD=excludeWildcard)
     # group eventual serialized item given in parseSelectionFile option by same parameter of above; used for manual item segmentation in ITERATIVE_PLAY_CONFIRM
     if nsArgParsed.parseSelectionFile!=None:
@@ -470,13 +482,13 @@ if __name__=="__main__":
     mostPopolousGroup,mostPopolousGroupKey=itemsGroupped[0][1],itemsGroupped[0][0]
 
     ### SELECT TARGET GROUPPABLE ITEMS
-    global SelectedList,SegSelectionMode
+    if Take==GUI_GROUPS_SELECT:
+        selection=guiMinimalStartGroupsMode(grouppings,trgtAction=SelectWholeGroup)
+        groupsTargets=[selection]
     if Take==GUI_TUMBNAIL_GROUPS_SELECT:
-        guiMinimalStartGroupsMode(grouppings)
-        # global SegSelectionMode
-        # if SegSelectionMode.get()==1: exit(0)
-        print(SelectedList)
-        groupsTargets=[SelectedList]
+        selection=guiMinimalStartGroupsMode(grouppings)
+        print(selection)
+        groupsTargets=[selection]
     elif Take==ITERATIVE_PLAY_CONFIRM :
         global SelectedGroupK
         if GUI_SELECT_GROUP_ITEMS:
@@ -508,8 +520,11 @@ if __name__=="__main__":
     SelectedList=SelectedList[:MAX_CONCAT]
 
     for g in range(len(groupsTargets)):
-        bash_batch_segs_gen,concat_filter_file,concat_filelist_fname=BASH_BATCH_SEGS_GEN+str(g),CONCAT_FILTER_FILE+str(g),CONCAT_FILELIST_FNAME+str(g)
+        bash_batch_segs_gen,concat_filter_file,concat_filelist_fname = BASH_BATCH_SEGS_GEN+str(g),CONCAT_FILTER_FILE+str(g),CONCAT_FILELIST_FNAME+str(g)
         print(bash_batch_segs_gen,concat_filter_file,concat_filelist_fname)
 
-        FFmpegConcatFlexible(groupsTargets[g],SEG_BUILD_METHOD=buildFFMPEG_segExtractNoReencode,segGenConfig=segGenConfig, \
+        if nsArgParsed.justFFmpegConcatFilter:
+            FFmpegConcatFilter(groupsTargets[g],concat_filter_file)
+        else:
+            FFmpegTrimConcatFlexible(groupsTargets[g],SEG_BUILD_METHOD=buildFFMPEG_segExtractNoReencode,segGenConfig=segGenConfig, \
                              BASH_BATCH_SEGS_GEN=bash_batch_segs_gen,CONCAT_FILELIST_FNAME=concat_filelist_fname,CONCAT_FILTER_FILE=concat_filter_file)

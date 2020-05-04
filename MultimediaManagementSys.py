@@ -439,7 +439,6 @@ def argParseMinimal(args):
     return nsArgParsed
 
 if __name__=="__main__":
-        a=argParseMinimal
         nsArgParsed = argParseMinimal(argv[1:])
         items = GetItems(nsArgParsed.pathStart)
         if nsArgParsed.mode=="ALL":

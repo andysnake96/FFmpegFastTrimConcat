@@ -19,7 +19,8 @@ from tkinter import messagebox
 from PIL import ImageTk, Image
 from functools import partial
 from MultimediaManagementSys import *
-
+from os import environ as env
+from copy import copy
 SelectedList = list()
 
 BTN_SELECTED_THICKNESS=7
@@ -30,14 +31,31 @@ def _select(selected):
     if normal mode re press on item cause de selection of last pressed
     will be append to  SelectedList ffmpeg cut string
     """
-    global PlayMode, SegSelectionMode, SegSelectionTimes, RemoveModeEnable
+    global SelectedList
+    global PlayMode, SegSelectionMode, SegSelectionTimes, RemoveModeEnable, DeleteGroupKeepOne
     global btns
     button=btns[selected.nameID]
+    print("selected\t:",len(SelectedList))
     if RemoveModeEnable.get():
-        if messagebox.askyesno('REMOVE'+selected.nameID, 'Remove?',icon='warning'):
-            selected.remove()
-            button.config(state="disabled")
+        target=[selected]
+        if DeleteGroupKeepOne.get() and len(SelectedList)>0: 
+            if target[0] not in SelectedList: SelectedList.append(target[0])
+            target=SelectedList
+            ## put the item leader of the selected at first position, selecting the one  with largerst size
+            maxItemIdx,maxSize=0,target[0].sizeB
+            for i in range(len(target)):
+                if target[i].sizeB>maxSize: maxItemIdx,maxSize=i,target[i].sizeB
+            target[0],target[maxItemIdx]=target[maxItemIdx],target[0]   
+            groupLeader=target.pop(0)
+        if messagebox.askyesno('REMOVE'+str(len(target)), 'Remove?',icon='warning'):
+            for t in target:
+                t.remove()
+                button=btns[t.nameID]
+                button.config(state="disabled")
+                button.config(highlightbackground = "black", highlightcolor= "black",highlightthickness=BTN_NN_SELECTED_THICKNESS,borderwidth=BTN_NN_SELECTED_THICKNESS)
+            btns[groupLeader.nameID].config(highlightbackground = "black", highlightcolor= "black",highlightthickness=BTN_NN_SELECTED_THICKNESS,borderwidth=BTN_NN_SELECTED_THICKNESS)
             del(selected,button)
+        if DeleteGroupKeepOne.get(): SelectedList=list()    #empty the list in group delettion
         return
     if PlayMode.get(): return selected.play()
     button.config(highlightbackground = "red", highlightcolor= "red",highlightthickness=BTN_SELECTED_THICKNESS,borderwidth=BTN_SELECTED_THICKNESS)
@@ -192,17 +210,19 @@ PlayMode=False
 
 ########      GUI CORE     ###############################
 RootTk=None
-def itemsGridViewStart(itemsSrc,sort="shuffle"):
+def itemsGridViewStart(itemsSrc,sort="nameID"):
     """
     start a grid view of the given MultimediaObjects items in the global Rootk or into a newone if Null
     :param itemsSrc: items to show in the grid view
-    :param sort:  how sort the items in the grid view, either duration,size,shuffle, if SORT defined as global take precedence
+    :param sort:  how sort the items in the grid view, either duration,size,sizeName,shuffle,nameID
     """
     #sort either size,duration
     global nextPage, RootTk,items, RemoveModeEnable
-    global PlayMode, SegSelectionMode, SegSelectionTimes
-    if sort=="duration":            itemsSrc.sort(key=lambda x:x.duration, reverse=True)
-    elif sort=="size":              itemsSrc.sort(key=lambda x:x.sizeB, reverse=True)
+    global PlayMode, SegSelectionMode, SegSelectionTimes, DeleteGroupKeepOne
+    if sort=="duration":            itemsSrc.sort(key=lambda x:float(x.duration), reverse=True)
+    elif sort=="size":              itemsSrc.sort(key=lambda x:int(x.sizeB), reverse=True)
+    elif sort=="sizeName":          itemsSrc.sort(key=lambda x:(x.nameID,int(x.sizeB)), reverse=True)
+    elif sort=="nameID":            itemsSrc.sort(key=lambda x:x.nameID )
     elif sort=="shuffle":           shuffle(itemsSrc)
 
     # if tk root already defined -> create a new root for a new window
@@ -221,26 +241,34 @@ def itemsGridViewStart(itemsSrc,sort="shuffle"):
     SegSelectionMode = tk.IntVar()
     segSelectionEnable = tk.Checkbutton(root, text="segSelectionEnable",variable=SegSelectionMode, command=_flushSelectedItems)
     segSelectionEnable.grid(row=2, column=0)
-    PlayMode= tk.BooleanVar()
-    playModeEnable= tk.Checkbutton(root, text="play",variable=PlayMode)
-    playModeEnable.grid(row=3, column=1)
-    playModeEnable.grid(row=3, column=1)
-    RemoveModeEnable=tk.BooleanVar()
-    remMode= tk.Checkbutton(root, text="remove",variable=RemoveModeEnable,command=_flushSelectedItems)
-    remMode.grid(row=4,column=1)
     SegSelectionTimes = tk.Entry(root)
     SegSelectionTimes.insert(0, "10 30")
     SegSelectionTimes.grid(row=2, column=1)
+
+    PlayMode= tk.BooleanVar()
+    playModeEnable= tk.Checkbutton(root, text="play",variable=PlayMode,width=10,heigh=4,background="green")
+    playModeEnable.grid(row=3, column=0)
+    RemoveModeEnable=tk.BooleanVar()
+    remMode= tk.Checkbutton(root, text="remove",variable=RemoveModeEnable)
+    remMode.grid(row=4,column=0)
+    DeleteGroupKeepOne=tk.BooleanVar()
+    delGroup= tk.Checkbutton(root, text="DeleteGroupKeepOne",variable=DeleteGroupKeepOne)
+    delGroup.grid(row=4,column=1)
 
     _nextPage(root=root)
     RootTk.mainloop()
 
 THRESHOLD_KEY_PRINT=133  #max chars to show in a button
+def SelectWholeGroup(items,groupK):
+    global SelectedList
+    SelectedList=copy(items)
+    print("selected group",groupK,"of :",SelectedList)
+
 def guiMinimalStartGroupsMode(groupsStart=None, prefix=" ", sortOnGroupLen=True,trgtAction=itemsGridViewStart, grouppingRule=sizeBatching,startSearch="."):
     """ groupsStart: dict of k-->itemsGroup to show on selection
         trgtAction: function to call on group selection, with as arg the selected items,groupKey
     """
-    global nextPage, groups, RootTk
+    global nextPage, groups, RootTk,SelectedList
     groups = groupsStart
     if groupsStart == "": groups = GetGroups(grouppingRule=grouppingRule,startSearch=startSearch)
     RootTk = tk.Tk()
@@ -269,3 +297,4 @@ def guiMinimalStartGroupsMode(groupsStart=None, prefix=" ", sortOnGroupLen=True,
         gotoGroup = partial(trgtAction, items, k)
         tk.Button(ScrolledFrameGroup, text=groupBtnTxt, command=gotoGroup).pack()
     RootTk.mainloop()
+    return SelectedList
