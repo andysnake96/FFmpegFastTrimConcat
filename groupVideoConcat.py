@@ -270,7 +270,7 @@ def concatFilterCmd(items,outFname="/tmp/out.mp4",ONTHEFLY_PIPE=True,PIPE_FORMAT
     concatFilterInStreamsString=""
     for x in range(numInputs): concatFilterInStreamsString+="["+str(x)+"]"
     outStrCmd+=' -filter_complex "'+concatFilterInStreamsString+"concat=n="+str(numInputs)+':v=1:a=1"'
-    outStrCmd+=" -vsync drop"      
+    outStrCmd+=" -vsync 2"      
     targetOutput=" "+outFname
     outStrCmd+=Encode
     if ONTHEFLY_PIPE: targetOutput=" -f "+PIPE_FORMAT+" - | ffplay - " #on the fly generate and play with ffplay
@@ -381,7 +381,8 @@ GroupKeys=["width","height","sample_aspect_ratio"]
 #groupKeys=["duration"]
 #ECLUDE KEYS-------------------------
 #excludeGroupKeys=["bit_rate","nb_frames","tags","disposition","avg_frame_rate","color","index"]
-ExcludeGroupKeys=["duration","bit_rate","nb_frames","tags","disposition","has_b_frame","avg_frame_rate","color"]
+#ExcludeGroupKeys=["duration","bit_rate","nb_frames","tags","disposition","has_b_frame","avg_frame_rate","color"]
+ExcludeGroupKeys=["bit_rate","nb_frames","tags","disposition","has_b_frame","avg_frame_rate","color"]
 #excludeGroupKeys=["rate","tags","disposition","color","index","refs"]
 
 def argParseMinimal(args):
@@ -400,7 +401,9 @@ def argParseMinimal(args):
     parser.add_argument("--groupDirect",type=bool,default=False,help="group metadata founded by direct groupping keys embedded in code")
     parser.add_argument("--justFFmpegConcatFilter",type=bool,default=False,help="concat selected items with ffmpeg's concat filter")
     parser.add_argument("--justMetadata",type=bool,default=False,help="pathname is not mandatory to be founded during item scan")
-    parser.add_argument("--genGroupFilenames",type=int,choices=[0,1,2],default=0,help="gen newline separated list of file paths for each founded group: 0=OFF,1=ON,2=JUST GEN groupFnames, no segmentation")
+    parser.add_argument("--genGroupFilenames",type=int,choices=[0,1,2],default=0,help="gen newline separated list of file paths for each founded group: 0=OFF,1=ON,2=JUST GEN groupFnames, no segmentation, cumulative time is logged before each file path with a line starting with #")
+    parser.add_argument("--genGroupFilenameShuffle",type=bool,default=True,help="shuffle order of item to write in genGroupFilenames")
+    parser.add_argument("--genGroupFilenamesPrefix",type=str,default="file ",help="prefix to append at each line of the generated file with genGroupFilenames")
     return parser.parse_args(args)
 
 if __name__=="__main__":
@@ -471,12 +474,18 @@ if __name__=="__main__":
         groupsTargets.append(v)
         i+=1
     if nsArgParsed.genGroupFilenames!=0:   #build group filename listing if requested
+        groupFileLinePrefix=nsArgParsed.genGroupFilenamesPrefix
         for i in range(len(itemsGroupped)):
             groupID,itemsList=itemsGroupped[i]
+            if nsArgParsed.genGroupFilenameShuffle: shuffle(itemsList)
             outGroupFileName="group_"+str(i)+".list"
             file=open(outGroupFileName,"w")
             file.write("#"+str(groupID)+"\n")
-            for item in itemsList:             file.write(item.pathName+"\n") 
+            duration=0
+            for item in itemsList:
+                file.write("#startAtSec:\t"+str(duration)+"\tfor: "+str(item.duration)+"\n")
+                file.write(groupFileLinePrefix+" "+item.pathName+"\n")
+                duration+=item.duration
             file.close()
     if nsArgParsed.genGroupFilenames==2: exit(0)     #asked to exit after group file generation
     mostPopolousGroup,mostPopolousGroupKey=itemsGroupped[0][1],itemsGroupped[0][0]

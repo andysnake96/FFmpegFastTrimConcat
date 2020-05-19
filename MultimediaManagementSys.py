@@ -74,7 +74,7 @@ if environ.get("FORCE_METADATA_GEN")!=None and "F" in environ["FORCE_METADATA_GE
 
 ############################################### Items Groupping Functions       #######################################
 ffprobeComputeResolutionSize=lambda itemStreamList: int(itemStreamList[0]["width"])*int(itemStreamList[0]["height"])
-def ffprobeExtractResolution(item):    return str(item.metadata[0]["width"])+" X "+str(item.metadata[0]["height"])
+def ffprobeExtractResolution(item):    return str(item.metadata[0]["width"])+" X "+str(item.metadata[0]["height"])+" SAR "+str(item.metadata[0]["sample_aspect_ratio"])
 #label element to group them by metadata s.t. they may be concateneted with the concat demuxer
 def ffmpegConcatDemuxerGroupping(item):     return GroupByMetadataValuesFlexible(item,["duration", "bit_rate", "nb_frames", "tags", "disposition", "avg_frame_rate", "color"],True,True)
 GrouppingFunctions={ f.__name__ : f for f in [ffprobeExtractResolution,ffmpegConcatDemuxerGroupping]}
