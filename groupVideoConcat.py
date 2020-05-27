@@ -367,11 +367,6 @@ def FFmpegTrimConcatFlexible(itemsList, SEG_BUILD_METHOD=buildFFMPEG_segExtractN
 
     #_debug_graph_turtle_segments(itemSegmentsList)
 
-#TARGETS SELECTION OPTIONS
-TAKE_ALL_MOST_POPOLOUS="TAKE_ALL_MOST_POPOLOUS"
-GUI_TUMBNAIL_GROUPS_SELECT="GUI_TUMBNAIL_GROUPS_SELECT"
-GUI_GROUPS_SELECT="GUI_GROUPS_SELECT"
-ITERATIVE_PLAY_CONFIRM="ITERATIVE_PLAY_CONFIRM"
 def _select_items_group(items,keyGroup):
     global SelectedGroupK
     SelectedGroupK=keyGroup
@@ -419,7 +414,7 @@ if __name__=="__main__":
         opt=nsArgParsed.__dict__[k]
         if opt!=None: segGenConfig[k]=opt
     #env override
-    selectTargetItems=TAKE_ALL_MOST_POPOLOUS
+    selectTargetItems="TAKE_ALL_MOST_POPOLOUS"
     startPath=nsArgParsed.pathStart
     Take=nsArgParsed.groupSelectionMode
     GUI_SELECT_GROUP_ITEMS=True             #if ITERATIVE_PLAY_CONFIRM: select group on gui
@@ -491,14 +486,14 @@ if __name__=="__main__":
     mostPopolousGroup,mostPopolousGroupKey=itemsGroupped[0][1],itemsGroupped[0][0]
 
     ### SELECT TARGET GROUPPABLE ITEMS
-    if Take==GUI_GROUPS_SELECT:
+    if Take=="GUI_GROUPS_SELECT":
         selection=guiMinimalStartGroupsMode(grouppings,trgtAction=SelectWholeGroup)
         groupsTargets=[selection]
-    if Take==GUI_TUMBNAIL_GROUPS_SELECT:
+    if Take=="GUI_TUMBNAIL_GROUPS_SELECT":
         selection=guiMinimalStartGroupsMode(grouppings)
         print(selection)
         groupsTargets=[selection]
-    elif Take==ITERATIVE_PLAY_CONFIRM :
+    elif Take=="ITERATIVE_PLAY_CONFIRM":
         global SelectedGroupK
         if GUI_SELECT_GROUP_ITEMS:
             guiMinimalStartGroupsMode(grouppings,trgtAction=_select_items_group)    #invoke group gui selection with trgtAction: select the whole group
