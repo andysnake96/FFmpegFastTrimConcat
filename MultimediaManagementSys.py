@@ -288,6 +288,13 @@ def _printCutPointsAsInputStr(cutPoints):       #print cutPoints as string
                 if end!=None:outStr+="end "+str(end)
         return outStr
 
+def parseTimeOffset(timeStr):
+    #parse time specification string
+    if ":" in timeStr:  return timeStr #[HH]:MM:SS.dec
+    secOffs=-1
+    try:    secOffs=float(timeStr)
+    return secOffs                      #sec.dec
+
 def SelectItemPlay(itemsList,skipNameList=None,dfltStartPoint=None,dfltEndPoint=None):
         """
         iterativelly play items and prompt for cmd insertion for selection/replay video, trim in segment by specifing cut times 
@@ -315,7 +322,7 @@ def SelectItemPlay(itemsList,skipNameList=None,dfltStartPoint=None,dfltEndPoint=
         #iteration play-selection loop
             replay=True
             while replay:
-                item.play()
+                item.play(" vlc ")
                 replay=False    #default 1 play
                 print("curr cutPoints:\t",_printCutPointsAsInputStr(item.cutPoints))
                 #Prompt String
@@ -328,19 +335,21 @@ def SelectItemPlay(itemsList,skipNameList=None,dfltStartPoint=None,dfltEndPoint=
             if "Q" in cmd.upper(): return selection,skipList
             fields=cmd.split()
             segmentationPoints=list()           #new segmentation points for the vid to append to the current one
-            for f in range(len(fields)):
-                #parse cmd fields
-                if "start" in fields[f].lower():
-                        segmentationPoints.append([float(fields[f+1]),end])    #allocate seg with given start and default end time 
-                if "end" in fields[f].lower(): segmentationPoints[-1][1]=float(fields[f+1]) #override last (dflt)  seg end time
-                if "hole" in fields[f].lower(): #dig hole in the last seg -> new 2 seg
-                        holeStart,holeEnd=float(fields[f+1]),float(fields[f+2])
-                        lastSeg=[dfltStartPoint,end]
-                        if len(segmentationPoints)>0:lastSeg=segmentationPoints.pop() #remove last segment,if exist, because is going to be cutted
-                        #resulting segment from the hole splitting 
-                        hseg0,hseg1=[lastSeg[0],holeStart],[holeEnd,lastSeg[1]] #split the last seg in 2
-                        segmentationPoints.append(hseg0)
-                        segmentationPoints.append(hseg1)
+            try:
+                for f in range(len(fields)):
+                    #parse cmd fields
+                    if "start" in fields[f].lower():
+                            segmentationPoints.append([parseTimeOffset(fields[f+1]),end])    #allocate seg with given start and default end time 
+                    if "end" in fields[f].lower(): segmentationPoints[-1][1]=parseTimeOffset(fields[f+1]) #override last (dflt)  seg end time
+                    if "hole" in fields[f].lower(): #dig hole in the last seg -> new 2 seg
+                            holeStart,holeEnd=parseTimeOffset(fields[f+1]),parseTimeOffset(fields[f+2])
+                            lastSeg=[dfltStartPoint,end]
+                            if len(segmentationPoints)>0:lastSeg=segmentationPoints.pop() #remove last segment,if exist, because is going to be cutted
+                            #resulting segment from the hole splitting 
+                            hseg0,hseg1=[lastSeg[0],holeStart],[holeEnd,lastSeg[1]] #split the last seg in 2
+                            segmentationPoints.append(hseg0)
+                            segmentationPoints.append(hseg1)
+            except Exception as e:  print("invalid cut cmd: ",fields,"\t\t",e)
             #extend current segmentation point with the new given
             item.cutPoints.extend(segmentationPoints) 
             print(item.cutPoints)
@@ -374,6 +383,7 @@ def DeserializeSelectionSegments(serializedItemsStr):
     deserialized=loads(serializedItemsStr)
     out=list()
     for i in deserialized:      out.append(MultimediaItem("").fromJson(i))
+    print("deserialized: ",len(out)," items")
     return out
 
 MODE_ABSTIME="MODE_ABSTIME"   #time points specified as num of second
@@ -427,7 +437,7 @@ def GenTrimReencodinglessScriptFFmpeg(items,accurateSeek=False,outFname=None):
     outLines=list()
     outLines.append("FFMPEG=ffmpeg #set custom ffmpeg path here")
     for i in items:
-        cutPointsNum=len(i.cutPointsNum)
+        cutPointsNum=len(i.cutPoints)
         if cutPointsNum==0: continue    #skip items without segments  -> no trimming required
         outLines.append("#rm "+i.pathName+"\n") #commented remove cmd for currnt vid
         ffmpegInputPath=" -i "+i.pathName
@@ -437,10 +447,10 @@ def GenTrimReencodinglessScriptFFmpeg(items,accurateSeek=False,outFname=None):
             trimSegCmd="eval $FFMPEG "
             if accurateSeek:trimSegCmd+=ffmpegInputPath
             trimSegCmd+=" -ss " +str(seg[0])
-            if seg[1]!=None: trimSegCmd+=" -to"+ str(seg[1])
+            if seg[1]!=None: trimSegCmd+=" -to "+ str(seg[1])
             if not accurateSeek: trimSegCmd+=ffmpegInputPath    #seek as output option
             trimSegCmd+=" -c copy -avoid_negative_ts 1 "
-            trimSegCmd+=i.pathName+"."+str(s)               #progressive suffix for segments to generate
+            trimSegCmd+=i.pathName+"."+str(s)+".mp4"               #progressive suffix for segments to generate
             outLines.append(trimSegCmd+"\n")
     if outFname!=None:
         fp=open(outFname,"w")
@@ -459,10 +469,18 @@ def argParseMinimal(args):
     parser.add_argument("--videoTrimSelectionLog",type=int,default=0,choices=[0,1,2],help="logging mode of VIDEO_TRIM_SELECTION mode: 0 (dflt) json serialization of selected file with embeddd cut points, 1 bash ffmpeg trim script with -ss -to -c: copy -avoid_negative_ts (commented rm source files lines ), 2 both")
     parser.add_argument("--mode",type=str,default="GROUP",choices=["ALL","GROUP"],help="Mode of View, either ALL -> show all, Groups show a init screen to select the group of items to show, used defined group function")
     parser.add_argument("--grouppingRule",type=str,default=ffmpegConcatDemuxerGroupping.__name__,choices=list(GrouppingFunctions.keys()),help="groupping mode of items")
-    parser.add_argument("--itemsSorting",type=str,default="shuffle",choices=["shuffle","size","duration"],help="how sort items in the GUI when showed the tumbnails ")
+    parser.add_argument("--itemsSorting",type=str,default="shuffle",choices=["shuffle","size","duration","nameID"],help="how sort items in the GUI when showed the tumbnails ")
     nsArgParsed = parser.parse_args(args)
     nsArgParsed.grouppingRule=GrouppingFunctions[nsArgParsed.grouppingRule]
     return nsArgParsed
+
+def multimediaItemsSorter(itemsSrc,sortMethod):
+    if sortMethod=="duration":            itemsSrc.sort(key=lambda x:float(x.duration), reverse=True)
+    elif sortMethod=="size":              itemsSrc.sort(key=lambda x:int(x.sizeB), reverse=True)
+    elif sortMethod=="sizeName":          itemsSrc.sort(key=lambda x:(x.nameID,int(x.sizeB)), reverse=True)
+    elif sortMethod=="nameID":            itemsSrc.sort(key=lambda x:x.nameID )
+    elif sortMethod=="shuffle":           shuffle(itemsSrc)
+    else:                           print("not founded sorting method")
 
 #VIDEO_TRIM_SELECTION mode out filenames
 SELECTION_FILE="selection.list"
@@ -472,7 +490,7 @@ if __name__=="__main__":
         items = GetItems(nsArgParsed.pathStart)
         if nsArgParsed.mode=="GROUP":  groups=GetGroups(items,grouppingRule=nsArgParsed.grouppingRule)
         else: items=list(items.values()) #extract the multimedia items list from if grouppings not required
-        if nsArgParsed.selectionMode=="TUMBNAIL_GRID":
+        if nsArgParsed.selectionMode=="TUMBNAIL_GRID":   #sorting hardcoded TODO partial arg pass
             if DISABLE_GUI: raise Exception("unable to start tumbnails grid with tkinter, enable GUI with enviorn variable DISABLE_GUI=True")
             if nsArgParsed.mode=="GROUP":
                 guiMinimalStartGroupsMode(groupsStart=groups)
@@ -482,11 +500,14 @@ if __name__=="__main__":
             if nsArgParsed.mode=="GROUP":
                 if not DISABLE_GUI: items=guiMinimalStartGroupsMode(grouppings,trgtAction=SelectWholeGroup,groupsStart=groups)
                 else: items=selectGroupTextMode(groups)
-            selected,skipped=SelectItemPlay(items,dfltStartPoint=nsArgParsed.videoTrimSelectionStartTime,dfltEndPoint=nsArgParsed.videoTrimSelectionEndTime)
+            if nsArgParsed.itemsSorting!=None:  multimediaItemsSorter(items,nsArgParsed.itemsSorting)   #sort items with the target method
+            skipOldNames,oldSelection=None,list()
             if nsArgParsed.videoTrimOldSelectionFile!=None: #extend current new selection with the old one
                 oldSelection=DeserializeSelectionSegments(open(nsArgParsed.videoTrimOldSelectionFile).read())
-                selected.extend(oldSelection)
+                skipOldNames=[item.pathName for item in oldSelection]
+            selected,skipped=SelectItemPlay(items,skipNameList=skipOldNames,dfltStartPoint=nsArgParsed.videoTrimSelectionStartTime,dfltEndPoint=nsArgParsed.videoTrimSelectionEndTime)
             print("selected: ",selected,"num",len(selected))
+            selected.extend(oldSelection)
             logging=nsArgParsed.videoTrimSelectionLog
             if logging==0 or logging==2: SerializeSelectionSegments(selected,SELECTION_FILE,True)
             if logging==1 or logging==2: GenTrimReencodinglessScriptFFmpeg(selected,outFname=TRIM_RM_SCRIPT)

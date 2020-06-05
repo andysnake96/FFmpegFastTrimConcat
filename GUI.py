@@ -210,6 +210,7 @@ PlayMode=False
 
 ########      GUI CORE     ###############################
 RootTk=None
+
 def itemsGridViewStart(itemsSrc,sort="nameID"):
     """
     start a grid view of the given MultimediaObjects items in the global Rootk or into a newone if Null
@@ -219,12 +220,7 @@ def itemsGridViewStart(itemsSrc,sort="nameID"):
     #sort either size,duration
     global nextPage, RootTk,items, RemoveModeEnable
     global PlayMode, SegSelectionMode, SegSelectionTimes, DeleteGroupKeepOne
-    if sort=="duration":            itemsSrc.sort(key=lambda x:float(x.duration), reverse=True)
-    elif sort=="size":              itemsSrc.sort(key=lambda x:int(x.sizeB), reverse=True)
-    elif sort=="sizeName":          itemsSrc.sort(key=lambda x:(x.nameID,int(x.sizeB)), reverse=True)
-    elif sort=="nameID":            itemsSrc.sort(key=lambda x:x.nameID )
-    elif sort=="shuffle":           shuffle(itemsSrc)
-
+    multimediaItemsSorter(itemsSrc,sort)        #sort with the target method
     # if tk root already defined -> create a new root for a new window
     if RootTk == None:
         root = RootTk = tk.Tk()

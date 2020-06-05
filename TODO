@@ -1,0 +1,18 @@
+SelectiveItemIterplay -> support for time hour-min-sec insert
+GetItems -> support for (nameID,jsonPath) list ~ queue
+	-> worker pool read -> json parse (imap_unordered +chunk=size/numCore)
+		-> itemsDict update
+draw -> 
+   	tumbrl = ImageTk.PhotoImage(Image.open(mitem.imgPath)) -> pre list queue build + concurreent read/tumrl create
+GUI tkinter global off ....
+Es worker pool
+ pool=Pool(None)	#pool with os.cpu_count()
+ for x in range(8): a.append(list(range(100*x,100*(x+1)))) #src list of work
+ def f(w): return sum(w),w[0]	#es concurrent func 
+ out=pool.imap(f,a)	#iterable .next() -> for ready
+ #TODO necessario close() + terminate()
+SUPPORT containers classes light with collection.namedtuple
+Es:
+ Point = namedtuple('Point', ['x', 'y','z'],defaults=[0]*3)
+	Point(1,2,3) -> light Point object immutable (named tuple -> C struct)
+
