@@ -159,6 +159,13 @@ def _nextPage(root=None, nextItems=None):
     drawItems(nextItems, ITEMS_LIMIT * pageN, ITEMS_LIMIT, True, root=root)
 
 font = ("Arial", 15, "bold")
+def _getImage(imgPath): 
+    out=None
+    if imgPath=="":     return out
+    #try:                    out=ImageTk.PhotoImage(Image.open(imgPath))  
+    try:                    out=Image.open(imgPath)
+    except Exception as e:  print("invalid img at: ",imgPath,"\t\t",e)
+    return out
 
 def drawItems(items, itemsStart=0, itemsToDrawLimit=ITEMS_LIMIT, FILTER_PATH_NULL=False, filterSize=0, root=None):
     global MainFrame, RootTk
@@ -171,26 +178,25 @@ def drawItems(items, itemsStart=0, itemsToDrawLimit=ITEMS_LIMIT, FILTER_PATH_NUL
     imgs = list()
     row, col, i = 5, 0, 0
     colSize = 5
-    for mitem in items[itemsStart:itemsStart + itemsToDrawLimit]:
+    itemsTarget=items[itemsStart:itemsStart + itemsToDrawLimit]
+    imgsArgs=[ i.imgPath for i in itemsTarget]  #imgs path 
+    #get imgs from file paths if the ammount is above POOL threshold (avoid only overhead of pickle/deserialize/fork/pool)
+    if len(imgsArgs)>POOL_TRESHOLD:     processed=list(concurrentPoolProcess(imgsArgs,_getImage,"badTumbNail") )
+    else:                               processed=list(map(_getImage,imgsArgs))
+    print(processed[:11])
+    for  i in range(len(itemsTarget)):
+        mitem=itemsTarget[i]
         funcTmp = partial(_select, mitem)
-        try:
-            itemSize = ffprobeComputeResolutionSize(mitem.metadata)
-        except:
-            itemSize = filterSize
-        if mitem.imgPath != "" and (mitem.pathName != "" or FILTER_PATH_NULL == False) and itemSize >= filterSize:
-            try:
-                tumbrl = ImageTk.PhotoImage(Image.open(mitem.imgPath))
-                #tumbrl.subsample(2)
-            except:
-                print("!!!!!badTumbNail at ", mitem.imgPath)
-                continue
-            imgs.append(tumbrl)  # avoid garbage collection of img data
+        tumbrl=ImageTk.PhotoImage(processed[i])
+        if tumbrl!=None:
             txt = ""
             if mitem.duration != 0: txt += "len secs\t" + str(mitem.duration)
             if mitem.sizeB != 0:    txt += "\nsize bytes\t" + str(mitem.sizeB)
             btn = tk.Button(MainFrame.interior, image=tumbrl, text=txt, compound="center", command=funcTmp, font=font)
+            #btns.append(btn)
+            imgs.append(tumbrl)
         else:
-            print("Item SKIPPED:\t", mitem, itemSize, filterSize)
+            print("skipped item, tumbnail err",mitem.imgPath,mitem.pathName,mitem.name)
             continue
 
         btns[mitem.nameID]=btn

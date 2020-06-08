@@ -29,6 +29,7 @@ GenPlayIterativeScript  ->      from a selection returned from the above cmd -> 
 GUI METHODS: itemsGridViewStart;        guiMinimalStartGroupsMode
 ________________________________________________________________________________________________________________________
 ENVIRON OVERRIDE OPTIONS
+POOL_TRESHOLD -> dflt 15 min jobs num to invoke pool map in place of standard map to avoid pickle/spawn/pool overhead on few data
 VERBOSE
 DISABLE_GUI
 NameIdFirstDot -> (dflt True )filename truncated to first dot to extract file nameID
@@ -36,6 +37,8 @@ SELECTION_LOGFILE       -> logFileName
 FORCE_METADATA_GEN -> (dflt True) force metadata generation for items
 ----for show items with tumbnails---
 MODE <- ALL <- show items not groupped, otherwise deflt grouppingRule given at guiMinimalStartGroupsMode 
+POOL_TRESHOLD <- jobs size threshold above which worker pool is used
+POOL_SIZE <-    worker pool size
 """
 
 from os import walk,path,environ
@@ -43,14 +46,22 @@ from sys import argv
 from json import load,loads,dumps
 from random import shuffle
 from subprocess import run,Popen,DEVNULL
+from multiprocessing import Pool
 from time import ctime
 from argparse import ArgumentParser
+
+POOL_TRESHOLD=15
+if "POOL_TRESHOLD" in environ:POOL_TRESHOLD=int(environ["POOL_TRESHOLD"])
+POOL_SIZE=4
+if "POOL_SIZE" in environ:POOL_SIZE=int(environ["POOL_SIZE"])
 DISABLE_GUI=False
 if "DISABLE_GUI" in environ and "T" in environ["DISABLE_GUI"].upper():DISABLE_GUI=True
 if not DISABLE_GUI:
     try:
         from GUI import *
-    except: DISABLE_GUI=True
+    except Exception as e:  
+        print("not importable GUI module",e)
+        DISABLE_GUI=True
 
 
 ######## ENV VAR CONFI##################
@@ -71,6 +82,38 @@ def ffmpegConcatDemuxerGroupping(item): #label element to group them by metadata
     return GroupByMetadataValuesFlexible(item,["duration", "bit_rate", "nb_frames", "tags", "disposition", "avg_frame_rate", "color"],True,True)
 
 GrouppingFunctions={ f.__name__ : f for f in [ffprobeExtractResolution,ffmpegConcatDemuxerGroupping,sizeBatching,durationBatching]}
+
+def _poolMapFunc(args):
+    item,function,errStr=args
+    try: out=function(item)
+    except Exception as e:  
+        print(errStr+" "+item,e)
+        out=None
+    return out
+def _poolMapFuncIDs(item,function,errStr): #item is a list of item,id
+    try: out=(function(item[0]),item)
+    except Exception as e:  
+        print(errStr+" "+item[0],e)
+        out=(None,item[1])
+    return out
+
+def concurrentPoolProcess(workQueue,function,errStr,concurrencyLev=POOL_SIZE,poolStart=None):
+    """
+    concurrently with a worker pool apply function to workQueue, using errStr if error occurr
+    workQueue is a list composed by item where apply function
+    returned iterable of [(function(target)], if error occurred some items will be set to None and printed errStr customized with arg
+    :param concurrencyLev  worker pool size
+    """
+    pool=poolStart
+    if poolStart==None:    pool=Pool(concurrencyLev)
+    mapArgs=list()
+    for item in workQueue: mapArgs.append( (item,function,errStr))
+    out=pool.map(_poolMapFunc,mapArgs)    #TODO PARTITIONIING MANUAL?
+    if poolStart==None:
+        pool.close()
+        pool.terminate
+        pool.join()
+    return out
 
 
 def GroupByMetadataValuesFlexible(item,groupKeysList,EXCLUDE_ON_KEYLIST=False,EXCLUDE_WILDCARD=True):
@@ -107,13 +150,14 @@ IMG_TUMBRL_EXTENSION="jpg"
 VIDEO_MULTIMEDIA_EXTENSION="mp4"
 METADATA_EXTENSION="json"
 #############	MODEL  ##############
-class MultimediaItem:
+class MultimediaItem:   
         """class rappresenting a video with same metadata"""
         def __init__(self,multimediaNameK):
                 self.nameID=multimediaNameK	 #AS UNIQUE ID -> MULTIMEDIA NAME (no path and no suffix)
                 self.pathName=""
                 self.sizeB=0
                 self.imgPath=""
+                self.img=None
                 self.metadataPath=""
                 self.metadata=""
                 self.duration=0                 #num of secs for the duration
@@ -122,10 +166,13 @@ class MultimediaItem:
         def __str__(self):                 return "Item: path: "+self.pathName+" size: "+str(self.sizeB)+" imgPath: "+self.imgPath
         def generateMetadata(self,FFprobeJsonCmd="ffprobe -v quiet -print_format json -show_format -show_streams"):
                 """generate metadata for item with subprocess.run """
-                FFprobeJsonCmdSplitted=FFprobeJsonCmd.split(" ")+ [self.pathName]
-                out=run(FFprobeJsonCmdSplitted,capture_output=True)
-                metadata=loads(out.stdout.decode())
-                self.sizeB,self.metadata,self.duration=_extractMetadataFFprobeJson(metadata)
+                out=None
+                try:
+                    FFprobeJsonCmdSplitted=FFprobeJsonCmd.split(" ")+ [self.pathName]
+                    out=run(FFprobeJsonCmdSplitted,capture_output=True)
+                    metadata=loads(out.stdout.decode())
+                    self.sizeB,self.metadata,self.duration=_extractMetadataFFprobeJson(metadata)
+                except Exception as e:    print("not possible to generate json metadata at:",self.pathName,"\t",e)
                 return out
         def play(self,playBaseCmd="ffplay -autoexit -fs "):
                 """play the MultimediaItem with the given playBaseCmd given """
@@ -149,6 +196,12 @@ class MultimediaItem:
                 for k,v in deserializedDict.items(): setattr(self,k,v)
                 return self
 
+def ffprobeMetadataGen(multimediaPath,FFprobeJsonCmd="ffprobe -v quiet -print_format json -show_format -show_streams"):
+        """generate metadata for item  at given path with subprocess.run """
+        FFprobeJsonCmdSplitted=FFprobeJsonCmd.split(" ")+ [multimediaPath]
+        out=run(FFprobeJsonCmdSplitted,capture_output=True)
+        metadata=loads(out.stdout.decode())
+        return _extractMetadataFFprobeJson(metadata)
 ## utils
 printList = lambda l: list(map(print, l))  #basic print list, return [None,...]
 def _extractMetadataFFprobeJson(metadata):
@@ -160,6 +213,7 @@ def _extractMetadataFFprobeJson(metadata):
         dur=streamsDictMetadata[0].get("duration",0)
         fileDur=float(dur)
         return fileSize,streamsDictMetadata,fileDur
+
 def parseMultimMetadata(fname):
         #parse ffprobe generated json metadata of fname file
         #return fileSize,streams array of dict metadata # that will have video stream as first
@@ -173,62 +227,83 @@ def _getLastDotIndex(string):
     return -1
 
 ################### Item selection-groupping
-#true if given fname with the extracted extension is uselss -> not contain Multimedia data by looking at the extension
+def extractExtension(filename):
+    extension,name=filename[-5:],filename
+    extIndx=filename.rfind(".")
+    if extIndx!=-1:
+        extension=filename[extIndx+1:]
+        if NameIdFirstDot:  name=filename[:filename.find(".")] #take until first dot
+        else:               name=filename[:extIndx]  
+    return extension,name
+
+#true if given fname with the extracted extension don't match the IMG extension, METADATA extension or Video extension
 skipFname=lambda fname,extension: not(IMG_TUMBRL_EXTENSION in extension or METADATA_EXTENSION in extension or VIDEO_MULTIMEDIA_EXTENSION in fname)
 def GetItems(rootPathStr=".",multimediaItems=dict(),forceMetadataGen=FORCE_METADATA_GEN,limit=float("inf")):
         """
         scan for multimedia objs from rootPathStr recursivelly
-        will be builded multimedia obj for each founded multimedia file
-        all multimedia objs will be structured in a dict itemNameKey->MultimediaObj, 
-            where itemNameKey is the file name until last dot (extension excluded)
-        multimediaItems can be given so it will updated in place
+        will be builded multimedia obj for each founded file with multimedia extension (see skipFname lambda above)
+        from each founded multimedia file name will be determined a nameKey=name without  [part] of extension -> see extractExtension
+        and multiple file will be groupped by the same nameKey and different extension: e.g. .mp4 + .jpg (tumbnail) +.json (metadata)
+        returned dict  itemNameKey->MultimediaObj   (multimediaItems dict modified in place, if given)
         if forceMetadataGen True -> for the vids missing metadata will be generated it sequentially with a subprocess.run cmd
-        return dict of fileNameKey->Multimedia Obj where fileNameKey is the extension truncated filename
+        limit is the max num of items to take during the scan
+        metadata read/parse/generation computed with paralell worker if num of jobs is above POOL_TRESHOLD
         """
         i=0
+        metadataFilesQueue=list()   #list of items to parse metadata
         for root, directories, filenames in walk(rootPathStr,followlinks=True):
                 #print(root,"\t",directories,"\t",filenames)            #pathName=path.join(path.abspath(root),filename)
+                #recursivelly search for filenames -> extract nameID (no extension) and group by that id in dict of object multimediaItem
                 for filename in filenames:
-                        #parse a name ID as the extension removed from each fname founded during the path walk
-                        extension=filename[-5:]
-                        extIndx=filename.rfind(".")
-                        name=filename
-                        if extIndx!=-1:
-                            extension=filename[extIndx+1:]
-                            if NameIdFirstDot: name=filename[:filename.find(".")] #take until first dot
-                            else: name=filename[:extIndx]  
-
-                        if skipFname(filename,extension): continue
-                        #init multimedia item obj if not already did
+                        #get nameKey from filename excluding the extension
+                        extension,name=extractExtension(filename)
+                        if skipFname(filename,extension):           continue
                         item=multimediaItems.get(name)
                         if item==None:
                                 item=MultimediaItem(name)
                                 multimediaItems[name]=item
-                        #recnoize if the file is a video a tumrl o a metadata file
+                        #recnoize if the file is a video a tumrl o a metadata file looking at the extension
                         fpath=path.join(path.abspath(root),filename)
                         if IMG_TUMBRL_EXTENSION in extension:   item.imgPath=fpath
-                        elif METADATA_EXTENSION in extension:
-                                try:
-                                    item.sizeB,item.metadata,item.duration=parseMultimMetadata(fpath) #skip bad/not fully formatted jsons
-                                    item.metadataPath=fpath
-                                except Exception as e: print("badJsonFormat at ",fpath,"\t",e)
+                        elif METADATA_EXTENSION in extension:   
+                            item.metadataPath=fpath
+                            metadataFilesQueue.append(item)
                         #elif VIDEO_MULTIMEDIA_EXTENSION in lastSuffix:
                         elif VIDEO_MULTIMEDIA_EXTENSION in filename:    #match extension embeded in fname before extension part
                         #else:	#take all possible other extension as video multimedia extension
                                 item.pathName=path.join(path.abspath(root),filename)
                                 item.extension=extension
-                        i+=1
                         if i>limit: break
-                if i>limit: break
-        print("MultimediaItems founded: ",len(multimediaItems))
-        if forceMetadataGen:
-            for i in multimediaItems.values():
-                if i.metadata=="" and len(i.pathName)>0:
-                    print("try Generate missing metadata at:\t",i.pathName)
-                    try:i.generateMetadata()
-                    except Exception as e: print("not possible to generate json metadata at:",i,"\t",e)
-                    
+                        i+=1
 
+        if len(metadataFilesQueue)>POOL_TRESHOLD:
+            #concurrent metadata files parse in order
+            metadataFilesPathQueue=[i.metadataPath for i in metadataFilesQueue]  #metadata files path to parse
+            processed=list(concurrentPoolProcess(metadataFilesPathQueue,parseMultimMetadata,"badJsonFormat"))
+            for i in range(len(metadataFilesQueue)):
+                metadata,item=processed[i],metadataFilesQueue[i]
+                if metadata==None:  continue
+                item.sizeB,item.metadata,item.duration=metadata
+        else: #sequential version if num of jobs is too little -> only pickle/spawn/... overhead in pool
+            #in place multimedia obj fill with parsed data of metadata files enqueued
+            for item in metadataFilesQueue:
+                item.sizeB,item.metadata,item.duration=parseMultimMetadata(item.metadataPath)
+        
+        if forceMetadataGen:    #generate missing metadata with run() calls + parse
+            metadataFilesQueue=list()   #items without metadata
+            for i in multimediaItems.values():
+                if i.metadata=="" and len(i.pathName)>0:  metadataFilesQueue.append(i)  #enqueue jobs
+            metadataFilesPathQueue=[i.pathName for i in metadataFilesQueue] #src multimedia files path to generate metadata
+            if len(metadataFilesQueue)>POOL_TRESHOLD:   #concurrent version
+                processed=list(concurrentPoolProcess(metadataFilesPathQueue,ffprobeMetadataGen,"metadata build err"))
+                #manually set processed metadata fields (pool.map work on different copies of objs)
+                for i in range(metadataFilesPathQueue):
+                    item,processedMetadata=metadataFilesPathQueue[i],processed[i]
+                    item.sizeB,item.metadata,item.duration=processedMetadata
+            else:     #sequential version if num of jobs is too little -> only pickle/spawn/... overhead in pool
+                for item in metadataFilesQueue:     item.generateMetadata()
+                    
+        print("MultimediaItems founded: ",len(multimediaItems))
         return multimediaItems
 
 GetItemsListRecurisve=lambda startPath=".":list(GetItems(".").values())
@@ -237,7 +312,7 @@ def GetGroups(srcItems=None,grouppingRule=ffmpegConcatDemuxerGroupping,startSear
         group items in a dict by a custom rule
         :param srcItems:  multimedia items to group as dict itemNameID->item, if None will be generated by a recoursive search from :param startSearch
         :param grouppingRule: function: multimediaItem->label (label= immutable key for groups dict)
-        :return: items groupped in a dict: groupKey->itemsList groupped
+        :return: items groupped in a dict: groupKey->list of multimedia items
         """
         groups=dict()   #groupKey->itemList
         if srcItems==None:  srcItems=GetItems(startSearch)
@@ -291,8 +366,10 @@ def _printCutPointsAsInputStr(cutPoints):       #print cutPoints as string
 def parseTimeOffset(timeStr):
     #parse time specification string
     if ":" in timeStr:  return timeStr #[HH]:MM:SS.dec
-    secOffs=-1
-    try:    secOffs=float(timeStr)
+    try:          secOffs=float(timeStr)
+    except:       
+        print("invalid ",timeStr)
+        secOffs=-1
     return secOffs                      #sec.dec
 
 def SelectItemPlay(itemsList,skipNameList=None,dfltStartPoint=None,dfltEndPoint=None):

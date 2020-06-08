@@ -1,4 +1,4 @@
-SelectiveItemIterplay -> support for time hour-min-sec insert
+TRY POOOL IN PLACE FUNCTION MAP!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 GetItems -> support for (nameID,jsonPath) list ~ queue
 	-> worker pool read -> json parse (imap_unordered +chunk=size/numCore)
 		-> itemsDict update
