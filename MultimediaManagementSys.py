@@ -47,7 +47,7 @@ from json import load,loads,dumps
 from random import shuffle
 from subprocess import run,Popen,DEVNULL
 from multiprocessing import Pool
-from time import ctime
+from time import perf_counter
 from argparse import ArgumentParser
 
 POOL_TRESHOLD=15
@@ -180,6 +180,7 @@ class MultimediaItem:
                 #run(cmd.split())
                 #out=Popen(cmd.split(),stderr=DEVNULL,stdout=DEVNULL)
                 out=Popen(cmd.split(),stderr=DEVNULL)
+                print("play: ",self.nameID)
         def remove(self):
                 cmd="rm "+self.pathName+" "+self.imgPath+" "+self.metadataPath
                 #out = Popen(cmd.split(), stderr=DEVNULL, stdout=DEVNULL).wait()
@@ -249,6 +250,7 @@ def GetItems(rootPathStr=".",multimediaItems=dict(),forceMetadataGen=FORCE_METAD
         limit is the max num of items to take during the scan
         metadata read/parse/generation computed with paralell worker if num of jobs is above POOL_TRESHOLD
         """
+        start=perf_counter()
         i=0
         metadataFilesQueue=list()   #list of items to parse metadata
         for root, directories, filenames in walk(rootPathStr,followlinks=True):
@@ -297,13 +299,14 @@ def GetItems(rootPathStr=".",multimediaItems=dict(),forceMetadataGen=FORCE_METAD
             if len(metadataFilesQueue)>POOL_TRESHOLD:   #concurrent version
                 processed=list(concurrentPoolProcess(metadataFilesPathQueue,ffprobeMetadataGen,"metadata build err"))
                 #manually set processed metadata fields (pool.map work on different copies of objs)
-                for i in range(metadataFilesPathQueue):
-                    item,processedMetadata=metadataFilesPathQueue[i],processed[i]
+                for i in range(len(metadataFilesPathQueue)):
+                    item,processedMetadata=metadataFilesQueue[i],processed[i]
                     item.sizeB,item.metadata,item.duration=processedMetadata
             else:     #sequential version if num of jobs is too little -> only pickle/spawn/... overhead in pool
                 for item in metadataFilesQueue:     item.generateMetadata()
                     
-        print("MultimediaItems founded: ",len(multimediaItems))
+        end=perf_counter()
+        print("MultimediaItems founded: ",len(multimediaItems),"in secs: ",end-start)
         return multimediaItems
 
 GetItemsListRecurisve=lambda startPath=".":list(GetItems(".").values())
@@ -363,16 +366,25 @@ def _printCutPointsAsInputStr(cutPoints):       #print cutPoints as string
                 if end!=None:outStr+="end "+str(end)
         return outStr
 
-def parseTimeOffset(timeStr):
+def parseTimeOffset(timeStr,convertToSec=False):
     #parse time specification string
-    if ":" in timeStr:  return timeStr #[HH]:MM:SS.dec
+    #if convertToSec: convert #[HH]:MM:SS.dec to float
+    secOffs=0
+    if ":" in timeStr:  
+        if not convertToSec: return timeStr #[HH]:MM:SS.dec
+        #convert to second
+        timeFields=timeStr.split(":")
+        for f in range(len(timeFields)-1,-1,-1):
+            secOffs+=(60*f+float(timeFields[f]))    
+        return secOffs
+    #given numerical timeStr
     try:          secOffs=float(timeStr)
     except:       
         print("invalid ",timeStr)
         secOffs=-1
     return secOffs                      #sec.dec
 
-def SelectItemPlay(itemsList,skipNameList=None,dfltStartPoint=None,dfltEndPoint=None):
+def SelectItemPlay(itemsList,skipNameList=None,dfltStartPoint=None,dfltEndPoint=None,RADIUS_DFLT=1.5):
         """
         iterativelly play items and prompt for cmd insertion for selection/replay video, trim in segment by specifing cut times 
         segmentation times, if given will be embedded in cutPoints as a list of [[start,end],...]
@@ -404,21 +416,32 @@ def SelectItemPlay(itemsList,skipNameList=None,dfltStartPoint=None,dfltEndPoint=
                 print("curr cutPoints:\t",_printCutPointsAsInputStr(item.cutPoints))
                 #Prompt String
                 vidDurStr="duration "+str(item.duration)
-                cmd=input("Add Vid with "+vidDurStr+" to targets?? ( [Y] || SKIP || QUIT || REPLAY ) [start XSECX] [end XSECX] [hole XSEC_HOLESTART XSEC_HOLEEND ] \t\t")
+                cmd=input("Add Vid with "+vidDurStr+"to targets?? ( [Y] || SKIP || QUIT || REPLAY ) [start START_TIME,END_TIME] [ringRange ringCenter,[radiousNNDeflt]] [hole HOLESTART HOLEEND ]\n\t")
                 if "REPLAY" in cmd.upper(): replay=True
-            if "SKIP" in cmd.upper(): 
+            if "SKIP" in cmd.upper() or cmd=="": 
                 skipList.append(item)
                 continue
+
             if "Q" in cmd.upper(): return selection,skipList
             fields=cmd.split()
             segmentationPoints=list()           #new segmentation points for the vid to append to the current one
             try:
                 for f in range(len(fields)):
                     #parse cmd fields
-                    if "start" in fields[f].lower():
-                            segmentationPoints.append([parseTimeOffset(fields[f+1]),end])    #allocate seg with given start and default end time 
-                    if "end" in fields[f].lower(): segmentationPoints[-1][1]=parseTimeOffset(fields[f+1]) #override last (dflt)  seg end time
-                    if "hole" in fields[f].lower(): #dig hole in the last seg -> new 2 seg
+                    fieldCurr=fields[f].lower()
+                    if "start" in fieldCurr or "s" in fieldCurr:
+                            startTime,endTime=parseTimeOffset(fields[f+1]),end  #allocate seg with given start and default end time 
+                            #retrieve end time if specified
+                            if f+2<len(fields) :   endTime=parseTimeOffset(fields[f+2])
+                            segmentationPoints.append([startTime,endTime])
+
+                    if "rr" in fieldCurr or "ringRange" in fieldCurr: #ring range center, radious
+                            radious=RADIUS_DFLT
+                            center=parseTimeOffset(fields[f+1],True)
+                            if f+2<len(fields) and fields[f+2].isdigit():   radious=float(fields[f+2])
+                            segmentationPoints.append([str(center-radious),str(center+radious)])
+
+                    if "hole" in fieldCurr: #dig hole in the last seg -> new 2 seg
                             holeStart,holeEnd=parseTimeOffset(fields[f+1]),parseTimeOffset(fields[f+2])
                             lastSeg=[dfltStartPoint,end]
                             if len(segmentationPoints)>0:lastSeg=segmentationPoints.pop() #remove last segment,if exist, because is going to be cutted
@@ -426,6 +449,7 @@ def SelectItemPlay(itemsList,skipNameList=None,dfltStartPoint=None,dfltEndPoint=
                             hseg0,hseg1=[lastSeg[0],holeStart],[holeEnd,lastSeg[1]] #split the last seg in 2
                             segmentationPoints.append(hseg0)
                             segmentationPoints.append(hseg1)
+
             except Exception as e:  print("invalid cut cmd: ",fields,"\t\t",e)
             #extend current segmentation point with the new given
             item.cutPoints.extend(segmentationPoints) 
@@ -433,26 +457,19 @@ def SelectItemPlay(itemsList,skipNameList=None,dfltStartPoint=None,dfltEndPoint=
             selection.append(item)
         return selection,skipList
 
-def SerializeSelectionSegments(selectedItems,filename=None,append=False):
+def SerializeSelectionSegments(selectedItems,filename=None):
         """
             trivial serialization given selectedItems in json using __dict__
             if filename given output will be written to file
-            if appendToFilename, new selectedItems will be appended to the previous in filename as a json list
             return serialized json string
         """
         outList=list()
         for i in selectedItems: outList.append(i.__dict__)
-        if append:
-                try:
-                    f=open(filename,"r+")
-                    prevItems=load(f)
-                    outList.extend(prevItems)
-                except: append=False
         serialization=dumps(outList,indent=2)
         if filename!=None:
-                if not append:f=open(filename,"w")
-                f.seek(0)
+                f=open(filename,"w")
                 f.write(serialization)
+                f.close()
         return serialization
 def DeserializeSelectionSegments(serializedItemsStr):
 
@@ -504,6 +521,8 @@ def GenPlayIterativeScript(items, baseCmd="ffplay -autoexit ",segGenConfig=SegGe
         else: print(outLines)
         return outLines
 
+
+#TODO ffmpeg any accurateSeek  + avoid_negative_ts make_zero -> initial null glitch
 def GenTrimReencodinglessScriptFFmpeg(items,accurateSeek=False,outFname=None):
     """ generate a bash script to trim items by their embedded cutpoints
         video cut will be done with ffmpeg -ss -to -c copy (reencodingless video/audio out) -avoid_negative_ts 1 (ts back to 0 in cutted)
@@ -512,11 +531,11 @@ def GenTrimReencodinglessScriptFFmpeg(items,accurateSeek=False,outFname=None):
         if outFname given, the script will be written in that path, otherwise printed to stdout
     """
     outLines=list()
-    outLines.append("FFMPEG=ffmpeg #set custom ffmpeg path here")
+    outLines.append("FFMPEG=/home/andysnake/ffmpeg/bin/nv/ffmpeg_g  #set custom ffmpeg path here\n")
     for i in items:
         cutPointsNum=len(i.cutPoints)
         if cutPointsNum==0: continue    #skip items without segments  -> no trimming required
-        outLines.append("#rm "+i.pathName+"\n") #commented remove cmd for currnt vid
+        outLines.append("\n#SEGMENTS OF "+i.pathName+"\n") #commented remove cmd for currnt vid
         ffmpegInputPath=" -i "+i.pathName
         #for each segments embedded generate ffmpeg -ss -to -c copy ...
         for s in range(cutPointsNum):
@@ -526,9 +545,11 @@ def GenTrimReencodinglessScriptFFmpeg(items,accurateSeek=False,outFname=None):
             trimSegCmd+=" -ss " +str(seg[0])
             if seg[1]!=None: trimSegCmd+=" -to "+ str(seg[1])
             if not accurateSeek: trimSegCmd+=ffmpegInputPath    #seek as output option
-            trimSegCmd+=" -c copy -avoid_negative_ts 1 "
+            #trimSegCmd+=" \t-c copy -avoid_negative_ts 1 "           #handle shifting of time stamps
+            trimSegCmd+=" -c copy -avoid_negative_ts make_zero "           #handle shifting of time stamps
             trimSegCmd+=i.pathName+"."+str(s)+".mp4"               #progressive suffix for segments to generate
             outLines.append(trimSegCmd+"\n")
+        outLines.append("#rm "+i.pathName+"\n") #commented remove cmd for currnt vid
     if outFname!=None:
         fp=open(outFname,"w")
         fp.writelines(outLines)
@@ -567,24 +588,30 @@ if __name__=="__main__":
         items = GetItems(nsArgParsed.pathStart)
         if nsArgParsed.mode=="GROUP":  groups=GetGroups(items,grouppingRule=nsArgParsed.grouppingRule)
         else: items=list(items.values()) #extract the multimedia items list from if grouppings not required
+
+        #GUI based selection of multimedia items
         if nsArgParsed.selectionMode=="TUMBNAIL_GRID":   #sorting hardcoded TODO partial arg pass
             if DISABLE_GUI: raise Exception("unable to start tumbnails grid with tkinter, enable GUI with enviorn variable DISABLE_GUI=True")
             if nsArgParsed.mode=="GROUP":
                 guiMinimalStartGroupsMode(groupsStart=groups)
             elif nsArgParsed.mode=="ALL":
                 itemsGridViewStart(list(items.values()))
+
         else:   # VIDEO_TRIM_SELECTION
             if nsArgParsed.mode=="GROUP":
                 if not DISABLE_GUI: items=guiMinimalStartGroupsMode(grouppings,trgtAction=SelectWholeGroup,groupsStart=groups)
                 else: items=selectGroupTextMode(groups)
             if nsArgParsed.itemsSorting!=None:  multimediaItemsSorter(items,nsArgParsed.itemsSorting)   #sort items with the target method
+            #recoverSelectionOld -> skip that items in SelectItemPlay
             skipOldNames,oldSelection=None,list()
             if nsArgParsed.videoTrimOldSelectionFile!=None: #extend current new selection with the old one
                 oldSelection=DeserializeSelectionSegments(open(nsArgParsed.videoTrimOldSelectionFile).read())
                 skipOldNames=[item.pathName for item in oldSelection]
+
             selected,skipped=SelectItemPlay(items,skipNameList=skipOldNames,dfltStartPoint=nsArgParsed.videoTrimSelectionStartTime,dfltEndPoint=nsArgParsed.videoTrimSelectionEndTime)
             print("selected: ",selected,"num",len(selected))
             selected.extend(oldSelection)
+            #output selection
             logging=nsArgParsed.videoTrimSelectionLog
-            if logging==0 or logging==2: SerializeSelectionSegments(selected,SELECTION_FILE,True)
+            if logging==0 or logging==2: SerializeSelectionSegments(selected,SELECTION_FILE)
             if logging==1 or logging==2: GenTrimReencodinglessScriptFFmpeg(selected,outFname=TRIM_RM_SCRIPT)

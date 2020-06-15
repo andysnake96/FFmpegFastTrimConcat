@@ -21,6 +21,7 @@ from functools import partial
 from MultimediaManagementSys import *
 from os import environ as env
 from copy import copy
+from time import perf_counter
 SelectedList = list()
 
 BTN_SELECTED_THICKNESS=7
@@ -178,12 +179,12 @@ def drawItems(items, itemsStart=0, itemsToDrawLimit=ITEMS_LIMIT, FILTER_PATH_NUL
     imgs = list()
     row, col, i = 5, 0, 0
     colSize = 5
+    start=perf_counter()
     itemsTarget=items[itemsStart:itemsStart + itemsToDrawLimit]
     imgsArgs=[ i.imgPath for i in itemsTarget]  #imgs path 
     #get imgs from file paths if the ammount is above POOL threshold (avoid only overhead of pickle/deserialize/fork/pool)
     if len(imgsArgs)>POOL_TRESHOLD:     processed=list(concurrentPoolProcess(imgsArgs,_getImage,"badTumbNail") )
     else:                               processed=list(map(_getImage,imgsArgs))
-    print(processed[:11])
     for  i in range(len(itemsTarget)):
         mitem=itemsTarget[i]
         funcTmp = partial(_select, mitem)
@@ -207,7 +208,8 @@ def drawItems(items, itemsStart=0, itemsToDrawLimit=ITEMS_LIMIT, FILTER_PATH_NUL
         if col >= colSize:
             col = 0
             row += 1
-    print(len(imgs))
+    end=perf_counter()
+    print("drawed: "len(imgs),"in secs: ",end-start)
     # root.mainloop()
 
 

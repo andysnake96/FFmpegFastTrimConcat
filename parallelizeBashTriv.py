@@ -35,9 +35,13 @@ dstScriptPath=srcScriptPath+str(Concurrency)+"_parallelized.sh"
 outLines=list()
 bashLines=open(srcScriptPath).readlines()
 if endL<=0: endL=len(bashLines)+endL         #handle negative last line number
-for i in range(startL,endL):
-    if i!=0 and i % Concurrency ==0: outLines.append("wait\n")
-    outLines.append(bashLines[i][:-1]+" &\n")
+i=0
+for line in bashLines[startL:endL]:
+    if line[0]=="#" or len(line)<=1:    continue
+    if i!=0 and i % Concurrency ==0: outLines.append("wait\n")  #end of concurrent lines
+    outLines.append(line[:-1]+" &\n")                           #another concurrent line
+    i+=1
+
 if outLines[-1]!="wait\n": outLines.append("wait\n")    #last line assure is a wait
 #write modded lines
 open(dstScriptPath,"w").writelines(outLines)
