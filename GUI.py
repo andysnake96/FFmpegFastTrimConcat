@@ -183,12 +183,13 @@ def drawItems(items, itemsStart=0, itemsToDrawLimit=ITEMS_LIMIT, FILTER_PATH_NUL
     itemsTarget=items[itemsStart:itemsStart + itemsToDrawLimit]
     imgsArgs=[ i.imgPath for i in itemsTarget]  #imgs path 
     #get imgs from file paths if the ammount is above POOL threshold (avoid only overhead of pickle/deserialize/fork/pool)
-    if len(imgsArgs)>POOL_TRESHOLD:     processed=list(concurrentPoolProcess(imgsArgs,_getImage,"badTumbNail") )
-    else:                               processed=list(map(_getImage,imgsArgs))
+    if len(imgsArgs)>POOL_TRESHOLD and False:       processed=list(concurrentPoolProcess(imgsArgs,_getImage,"badTumbNail") )
+    else:                                           processed=list(map(_getImage,imgsArgs))
     for  i in range(len(itemsTarget)):
         mitem=itemsTarget[i]
         funcTmp = partial(_select, mitem)
-        tumbrl=ImageTk.PhotoImage(processed[i])
+        try: tumbrl=ImageTk.PhotoImage(processed[i])
+        except Exception as e: print(e);tumbrl=None
         if tumbrl!=None:
             txt = ""
             if mitem.duration != 0: txt += "len secs\t" + str(mitem.duration)
@@ -197,7 +198,7 @@ def drawItems(items, itemsStart=0, itemsToDrawLimit=ITEMS_LIMIT, FILTER_PATH_NUL
             #btns.append(btn)
             imgs.append(tumbrl)
         else:
-            print("skipped item, tumbnail err",mitem.imgPath,mitem.pathName,mitem.name)
+            print("skipped item, tumbnail err",mitem.imgPath,mitem.pathName,mitem.nameID)
             continue
 
         btns[mitem.nameID]=btn
@@ -209,7 +210,7 @@ def drawItems(items, itemsStart=0, itemsToDrawLimit=ITEMS_LIMIT, FILTER_PATH_NUL
             col = 0
             row += 1
     end=perf_counter()
-    print("drawed: "len(imgs),"in secs: ",end-start)
+    print("drawed: ",len(imgs),"in secs: ",end-start)
     # root.mainloop()
 
 

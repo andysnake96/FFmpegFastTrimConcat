@@ -276,16 +276,28 @@ def concatFilterCmd(items,outFname="/tmp/out.mp4",ONTHEFLY_PIPE=True,PIPE_FORMAT
     if ONTHEFLY_PIPE: targetOutput=" -f "+PIPE_FORMAT+" - | ffplay - " #on the fly generate and play with ffplay
     outStrCmd+=targetOutput
     return outStrCmd
-def FFmpegConcatFilter(itemsList,outScriptFname,onTheFlayFFPlay=False):
+def FFmpegConcatFilter(itemsList,outScriptFname,onTheFlayFFPlay=False,maxConcatSize=50*2**20,maxConcatDur=500):
     """
     concat itemsList of MultimediaItems with ffmpeg concat filter
     """
-    itemsPaths=[i.pathName for i in itemsList]
-    print(itemsList,itemsPaths)
-    outFp=open(outScriptFname,"w")
-    ffmpegConcatFilterCmd=concatFilterCmd(itemsPaths,ONTHEFLY_PIPE=onTheFlayFFPlay)
-    outFp.write(ffmpegConcatFilterCmd)
-    outFp.close()
+    itemsPathsGroups=list()
+    group=list()               
+    cumulativeSize,cumulativeDur=0,0
+    for item in itemsList:
+        #flush in single concat script items that have exceeded the thresholds
+        if cumulativeDur+item.duration > maxConcatDur or cumulativeSize+item.sizeB > maxConcatSize:
+            group=list()
+            itemsPathsGroups.append(group)
+        group.append(item.pathName)
+    if len(group)>0: itemsPathsGroups.append(group)
+
+    #for each group write a single concat filter script
+    for i in range(len(itemsPathsGroups)):
+        itemsPaths=itemsPathsGroups[i]
+        outFp=open(outScriptFname+str(i),"w")
+        ffmpegConcatFilterCmd=concatFilterCmd(itemsPaths,ONTHEFLY_PIPE=onTheFlayFFPlay,outFname="/tmp/out"+str(i)+outScriptFname+".mp4")
+        outFp.write(ffmpegConcatFilterCmd)
+        outFp.close()
 
 
 def FFmpegTrimConcatFlexible(itemsList, SEG_BUILD_METHOD=buildFFMPEG_segExtractNoReencode,segGenConfig=None,**opts):
@@ -520,8 +532,6 @@ if __name__=="__main__":
         #SelectedList=metadataItems  #TODO force all
     #### SEGMENTIZE AND CONCAT SELECTED ITEMS GROUPPED BY BY BASH FFMPEG SCRIPT GENERATION
     shuffle(SelectedList)
-    MAX_CONCAT=5000
-    SelectedList=SelectedList[:MAX_CONCAT]
 
     for g in range(len(groupsTargets)):
         bash_batch_segs_gen,concat_filter_file,concat_filelist_fname = BASH_BATCH_SEGS_GEN+str(g),CONCAT_FILTER_FILE+str(g),CONCAT_FILELIST_FNAME+str(g)

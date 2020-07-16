@@ -180,7 +180,7 @@ class MultimediaItem:
                 #run(cmd.split())
                 #out=Popen(cmd.split(),stderr=DEVNULL,stdout=DEVNULL)
                 out=Popen(cmd.split(),stderr=DEVNULL)
-                print("play: ",self.nameID)
+                print("play: ",self.pathName)
         def remove(self):
                 cmd="rm "+self.pathName+" "+self.imgPath+" "+self.metadataPath
                 #out = Popen(cmd.split(), stderr=DEVNULL, stdout=DEVNULL).wait()
@@ -301,7 +301,7 @@ def GetItems(rootPathStr=".",multimediaItems=dict(),forceMetadataGen=FORCE_METAD
                 #manually set processed metadata fields (pool.map work on different copies of objs)
                 for i in range(len(metadataFilesPathQueue)):
                     item,processedMetadata=metadataFilesQueue[i],processed[i]
-                    item.sizeB,item.metadata,item.duration=processedMetadata
+                    if processedMetadata!=None:     item.sizeB,item.metadata,item.duration=processedMetadata
             else:     #sequential version if num of jobs is too little -> only pickle/spawn/... overhead in pool
                 for item in metadataFilesQueue:     item.generateMetadata()
                     
@@ -369,13 +369,17 @@ def _printCutPointsAsInputStr(cutPoints):       #print cutPoints as string
 def parseTimeOffset(timeStr,convertToSec=False):
     #parse time specification string
     #if convertToSec: convert #[HH]:MM:SS.dec to float
+    if type(timeStr)!=str:  return timeStr  #TODO GenPlayIterativeScript
     secOffs=0
     if ":" in timeStr:  
         if not convertToSec: return timeStr #[HH]:MM:SS.dec
         #convert to second
         timeFields=timeStr.split(":")
-        for f in range(len(timeFields)-1,-1,-1):
-            secOffs+=(60*f+float(timeFields[f]))    
+        for f in range(len(timeFields)):
+            field=timeFields[len(timeFields)-1-f]
+            if f==0:    secOffs+=(60*f+float(field))     #seconds
+            else:       secOffs+=(60*f*float(field))     #min or hour
+            print(secOffs,timeStr)
         return secOffs
     #given numerical timeStr
     try:          secOffs=float(timeStr)
@@ -492,20 +496,21 @@ def GenPlayIterativeScript(items, baseCmd="ffplay -autoexit ",segGenConfig=SegGe
         """
         outLines=list()
         j=0
-        startConstr=segGenConfig["minStartConstr"]
-        endConstr=segGenConfig["maxEndConstr"]
+        ##startConstr=segGenConfig["minStartConstr"]    #TODO?
+        ##endConstr=segGenConfig["maxEndConstr"]
         for i in items:
                 if i.cutPoints!=list():
                         for s in i.cutPoints:
                                 playCmd=baseCmd
                                 playCmd+=" -ss "+str(s[0])
                                 #set segEndTime default overridable by nn None seg end
-                                end= endConstr
+                                end=i.duration
                                 if s[1]!=None: end =s[1]
-                                if end<=0:end+=i.duration
-                                t=end-s[0]                       #compute end with duration from seeked start
+                                #if end<=0:end+=i.duration
+                                print(end,s[0],"\n")
+                                t=parseTimeOffset(end,True)-parseTimeOffset(s[0],True)                       #compute end with duration from seeked start
                                 playCmd+=" -t "+str(t)
-                                playCmd+=" -window_title "+str(j)
+                                playCmd+=" -window_title '"+str(j)+"  "+i.nameID+"'"
                                 playCmd+=" '"+i.pathName+"'\n"
                                 outLines.append(playCmd)
                                 j+=1
@@ -601,6 +606,7 @@ if __name__=="__main__":
             if nsArgParsed.mode=="GROUP":
                 if not DISABLE_GUI: items=guiMinimalStartGroupsMode(grouppings,trgtAction=SelectWholeGroup,groupsStart=groups)
                 else: items=selectGroupTextMode(groups)
+            items=FilterItems(items,True,False,False)
             if nsArgParsed.itemsSorting!=None:  multimediaItemsSorter(items,nsArgParsed.itemsSorting)   #sort items with the target method
             #recoverSelectionOld -> skip that items in SelectItemPlay
             skipOldNames,oldSelection=None,list()
