@@ -183,7 +183,7 @@ def drawItems(items, itemsStart=0, itemsToDrawLimit=ITEMS_LIMIT, FILTER_PATH_NUL
     itemsTarget=items[itemsStart:itemsStart + itemsToDrawLimit]
     imgsArgs=[ i.imgPath for i in itemsTarget]  #imgs path 
     #get imgs from file paths if the ammount is above POOL threshold (avoid only overhead of pickle/deserialize/fork/pool)
-    if len(imgsArgs)>POOL_TRESHOLD and False:       processed=list(concurrentPoolProcess(imgsArgs,_getImage,"badTumbNail") )
+    if len(imgsArgs)>POOL_TRESHOLD and False:       processed=list(concurrentPoolProcess(imgsArgs,_getImage,"badTumbNail",POOL_SIZE) )
     else:                                           processed=list(map(_getImage,imgsArgs))
     for  i in range(len(itemsTarget)):
         mitem=itemsTarget[i]
@@ -229,7 +229,7 @@ def itemsGridViewStart(itemsSrc,sort="nameID"):
     #sort either size,duration
     global nextPage, RootTk,items, RemoveModeEnable
     global PlayMode, SegSelectionMode, SegSelectionTimes, DeleteGroupKeepOne
-    multimediaItemsSorter(itemsSrc,sort)        #sort with the target method
+    vidItemsSorter(itemsSrc,sort)        #sort with the target method
     # if tk root already defined -> create a new root for a new window
     if RootTk == None:
         root = RootTk = tk.Tk()
