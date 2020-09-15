@@ -134,20 +134,27 @@ def DeserializeSelectionSegments(serializedItemsStr):
 
 ######
 ### Vid Item gather from filesystem
-def extractExtension(filename, nameIdFirstDot=NameIdFirstDot):
+def extractExtension(filename, PATH_ID,nameIdFirstDot=NameIdFirstDot):
     """
     extract the extension and nameID from filename
     if
-    @param filename:        filename
+    @param filename:        file    path if PATH_ID, otherwise just file name without dirs path. expected fnames without "/"
+    @param PATH_ID:         consider nameID=file path given in filename without the extension
     @param nameIdFirstDot:  if true nameId will be extracted up to the first Dot ( dflt=last dot)
     @return: extension,nameId
     """
-    extension, name = filename[-5:], filename
-    extIndx = filename.rfind(".")  # last dot
+    #extract filename from the given path
+    fname,fpath=filename,filename   
+    fnameIdx = fname.rfind("/") +1  #idx of start of fname (last "/") -> expected filename without /
+    if PATH_ID:        fname,fpath=filename[fnameIdx:],filename
+    #try 4 char extension if not "." will be founded
+    extension,nameID=  fname[-4:],fname[:-4] 
+    extIndx = fname.rfind(".")  # last dot
     if extIndx != -1:
-        if nameIdFirstDot:  extIndx = filename.find(".")  # first dot
-        name, extension = filename[:extIndx], filename[extIndx + 1:]
-    return extension, name
+        if nameIdFirstDot:  extIndx = fname.find(".")  # first dot
+        nameID, extension = fname[:extIndx], fname[extIndx + 1:]
+    if PATH_ID: nameID=fpath[:fnameIdx]+nameID         #concat path of file with the extracted nameID (extension(s) removed)
+    return extension, nameID
 
 
 def skipFname(extension):
@@ -160,7 +167,7 @@ def skipFname(extension):
     return skip
 
 
-def GetItems(rootPath=".", vidItems=dict(), forceMetadataGen=FORCE_METADATA_GEN, limit=float("inf"), followlinks=True):
+def GetItems(rootPath=".", vidItems=dict(), PATH_ID=True,forceMetadataGen=FORCE_METADATA_GEN, limit=float("inf"), followlinks=True):
     """
     scan for vid objs from rootPathStr recursivelly
     will be builded a Vid objfor each founded group of files with the same nameID if the extension is in a defined set (see skipFname)
@@ -169,7 +176,8 @@ def GetItems(rootPath=".", vidItems=dict(), forceMetadataGen=FORCE_METADATA_GEN,
     metadata read/parse/generation is computed in parallel with a poll of workers if num of jobs is above POOL_TRESHOLD
 
     @param rootPath:     start path for the recursive vid file search
-    @param vidItems:        dict of Vid items: nameID -> Vid obj (dflt empty dict)
+    @param vidItems:        dict of Vid items: nameID -> Vid obj (dflt empty dict). Useful to increment a previous scan
+    @param PATH_ID:      item nameKey = path of the video file without the extension -> match metadata / tumbnail in same folder
     @param forceMetadataGen:force the generation of metadata of each Vidobj without metadata's fields
     @param limit:           up bound of Vid items to found (dflt inf)
     @param followlinks:     follow sym links during file search (dflt True)
@@ -180,8 +188,9 @@ def GetItems(rootPath=".", vidItems=dict(), forceMetadataGen=FORCE_METADATA_GEN,
     doubleCounter=0
     for root, directories, filenames in walk(rootPath, followlinks=followlinks):
         for filename in filenames:
+            fpath = path.join(path.abspath(root), filename)
             # extract nameKey and extension from filename, skip it if skipFname gives true
-            extension, nameKey = extractExtension(filename)
+            extension, nameKey = extractExtension(fpath,PATH_ID)
             if skipFname(extension):                          continue
             # update vidItems dict with the new vid file founded
             item = vidItems.get(nameKey)
@@ -189,7 +198,6 @@ def GetItems(rootPath=".", vidItems=dict(), forceMetadataGen=FORCE_METADATA_GEN,
                 item = Vid(nameKey)
                 vidItems[nameKey] = item
             # populate Vid fields with the current file informations by looking at the extension
-            fpath = path.join(path.abspath(root), filename)
             if IMG_TUMBRL_EXTENSION in extension:
                 item.imgPath = fpath
             elif METADATA_EXTENSION in extension:
@@ -303,20 +311,25 @@ def selectGroupTextMode(groups,joinGroupItems=True):
     print("selected items: ",len(out))
     return out
 
-def FilterItems(items, pathPresent=True, tumbNailPresent=False, metadataPresent=True,durationPos=True):
+def FilterItems(items, pathPresent=True, tumbNailPresent=False, metadataPresent=True,durationPos=True,filterKW=FilterKW):
     """
     filter items by the optional flags passed
     @param items: source items list
     @param pathPresent: filter away items without pathname set  (dflt true)
     @param tumbNailPresent:  filter away items without tumbnail img path set
     @param metadataPresent:  filter away items without metadata dict set
+    @param filterKW:  list of keywords to match to item.pathName to discard vids
     @return: filtered items in a new list
     """
     outList = list()
     for i in items:
-        if (not pathPresent or i.pathName != None) and (not tumbNailPresent or i.imgPath !=None) \
-                and (not metadataPresent or i.metadata !=None) and (not durationPos or i.duration>0):
-            outList.append(i)
+        keep=(not pathPresent or i.pathName != None) and (not tumbNailPresent or i.imgPath !=None) \
+                and (not metadataPresent or i.metadata !=None) and (not durationPos or i.duration>0) #true if correct fields in item
+        for kw in filterKW:
+            if not keep or kw in i.pathName:
+                keep=False
+                break
+        if keep:    outList.append(i) 
         #LOG MISSING FIELDS
         if i.pathName != "" and i.imgPath == "":print("Missing thumbnail at \t", i.nameID,file=stderr) #dump missinig tumbnails
         if i.metadata==None:                    print("None metadata", i.nameID, file=stderr)

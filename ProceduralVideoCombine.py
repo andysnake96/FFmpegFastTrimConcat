@@ -114,9 +114,9 @@ def argParseMinimal(args):
     parser.add_argument("--segsLenSecMin", type=int, default=None, help="")
     parser.add_argument("--maxSegN", type=int, default=None, help="")
     parser.add_argument("--groupSelectionMode", type=str,
-                        choices=["GUI_TUMBNAIL_SELECT", "TAKE_ALL_MOST_POPOLOUS","MULTI_GROUPS","GROUPS_ITEMS"], default="GROUPS_ITEMS",
+                        choices=["GUI_TUMBNAIL_SELECT", "TAKE_ALL_MOST_POPOLOUS","MULTI_GROUPS","GROUPS_ITEMS","ALL_MERGED"], default="GROUPS_ITEMS",
                         help="mode of selecting groups to concat: GUI_TUMBNAIL_SELECT -> select item via avaible tumbnails in gui module\n"
-                             "TAKE_ALL_MOST_POPOLOUS -> take the most popolouse group,\nMULTI_GROUPS -> select multiple groups to apply segmnt. & concat separatelly\n"
+                             "TAKE_ALL_MOST_POPOLOUS -> take the most popolouse group,\nMULTI_GROUPS -> select multiple groups to apply segmnta. & concat separatelly\n ALL_MERGED -> operate on all founded items"
                              "GROUPS_ITEMS -> select groups to applay segmnt. & concat togheter")
     # parser.add_argument("--grouppingRule",type=str,default=ffmpegConcatDemuxerGroupping.__name__,choices=list(GrouppingFunctions.keys()),help="groupping mode of items")
     parser.add_argument("--concurrencyLev", type=int, default=2,
@@ -200,10 +200,12 @@ if __name__ == "__main__":
     elif Take == "MULTI_GROUPS":
         #if not DISABLE_GUI:         selection = guiMinimalStartGroupsMode(grouppings, trgtAction=SelectWholeGroup) #TODO GUI
         selectedGroups = selectGroupTextMode(grouppings,joinGroupItems=False)
-    if Take == "GUI_TUMBNAIL_SELECT":
+    elif Take == "GUI_TUMBNAIL_SELECT":
         assert not DISABLE_GUI,"not avaible gui"
         selection = guiMinimalStartGroupsMode(grouppings)
         print(selection)
+    elif Take == "ALL_MERGED":
+        selection = items
     else:   #TAKE_ALL_MOST_POPULOSE
         selection= mostPopolousGroup
     if len(selectedGroups)==0: selectedGroups=[selection]   #populate target group if not selected multi groups

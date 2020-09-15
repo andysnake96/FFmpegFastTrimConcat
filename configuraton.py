@@ -27,6 +27,9 @@ if not DISABLE_GUI:  # try to enable GUI importing GUI module (with its tkinter 
         DISABLE_GUI = True
 NameIdFirstDot = True  # IF TRUE the nameID will be extracted from a path name up to the first founded dot
 if env.get("NameIdFirstDot") != None and "F" in env["NameIdFirstDot"].upper(): NameIdFirstDot = False
+#export comma separated list of keyword to filter away items after a scan
+FilterKW=[]
+if env.get("FilterKW") != None: FilterKW=env["FilterKW"].split(",") 
 FORCE_METADATA_GEN = True  # force the generation of metadata of each founeded vid without a matching metadata file
 if env.get("FORCE_METADATA_GEN") != None and "F" in env[
     "FORCE_METADATA_GEN"].upper(): FORCE_METADATA_GEN = False

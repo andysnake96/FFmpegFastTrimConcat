@@ -94,8 +94,8 @@ def GenTrimReencodinglessScriptFFmpeg(items, accurateSeek=False, outFname=None):
 ### SEG CUT CMD GEN
 #RE-ENCODINGLESS
 ## cut a selected segment of video with seek options as input or output(more accurate ??)
-buildFFMPEG_segExtractNoReencode=       lambda pathName,segStart,segTo,destPath:FFMPEG +" -ss " + str(segStart) +" -to " + str(segTo) +" -i '" + pathName +"' -c copy -avoid_negative_ts make_zero " + cleanPathname(destPath)
-buildFFMPEG_segExtractPreciseNoReencode=lambda pathName,segStart,segTo,destPath:FFMPEG +" -i '" + pathName+"' -ss " + str(segStart) +" -to " + str(segTo)  +" -c copy -avoid_negative_ts make_zero " + cleanPathname(destPath)
+buildFFMPEG_segExtractNoReencode=       lambda pathName,segStart,segTo,destPath:"eval $FFMPEG" +" -ss " + str(segStart) +" -to " + str(segTo) +" -i '" + pathName +"' -c copy -avoid_negative_ts make_zero " + cleanPathname(destPath)
+buildFFMPEG_segExtractPreciseNoReencode=lambda pathName,segStart,segTo,destPath:"eval $FFMPEG" +" -i '" + pathName+"' -ss " + str(segStart) +" -to " + str(segTo)  +" -c copy -avoid_negative_ts make_zero " + cleanPathname(destPath)
 #RE-ENCODING
 buildFFMPEG_segTrimPreSeek=lambda pathName,segStart,segTo,destPath:FFMPEG+" -ss "+str(segStart)+" -i "+pathName+" -vf trim="+str(segStart)+":"+str(segTo)+Encode+"'"+destPath+"'" #trim filter
 buildFFMPEG_segTrim=lambda pathName,segStart,segTo,destPath:FFMPEG+Decode+" -ss "+str(segStart)+" -i "+pathName+" -vf trim="+str(segStart)+":"+str(segTo)+Encode+"'"+destPath+"'" #trim filter
@@ -156,10 +156,10 @@ def FFmpegTrimConcatFlexible(itemsList,GenVideoCutSegmentsRndFunc, SEG_BUILD_MET
     # write bash ffmpeg build segs
     bashBatchSegGen = open(bash_batch_segs_gen, "w")
     #preliminar cmds: tmp dir of tmpfs(optional), remove previous dir same named if any
-    bashBatchSegGen.write("mkdir tmpCut\n#sudo mount -t tmpfs none tmpCut\n")
+    bashBatchSegGen.write("export FFMPEG=\""+FFMPEG+"\"\nmkdir tmpCut\n#sudo mount -t tmpfs none tmpCut\n")
     bashBatchSegGen.write("#rm -r tmpCut/*\n")
     #directories for the segments to cut
-    bashBatchSegGen.writelines(["mkdir "+item.segsDir+"\n" for item in itemsTrimList])
+    bashBatchSegGen.writelines(["mkdir '"+item.segsDir+"'\n" for item in itemsTrimList])
     #ffmpeg cut cmds
     segsCmds=[seg.trimCmd for item in itemsTrimList for seg in item.segs]   #extract trim cmds
     if concurrencyLev > 0:

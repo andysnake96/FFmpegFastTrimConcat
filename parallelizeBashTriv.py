@@ -22,13 +22,14 @@ output script placed in same src script folder with <Concurrency>_parallelized.s
 from sys import argv
 #parse args
 if len(argv) < 2:
-        print("usage <omogenous bash script path to parallelize, [CONCURRENCY LEVEL (dflt 3)] [START END lineNum to parallelize (dflt 0 0 as the whole file )]>")
+        print("usage <omogenous bash script path to parallelize, [CONCURRENCY LEVEL (dflt 3)] [START END lineNum to parallelize (dflt 0 0 as the whole file, negative end subtracted to tot lines num  )]>")
         print(__doc__)
+        print(argv)
         exit(1)
 Concurrency=3
-if len(argv) == 3: Concurrency=int(argv[2])
+if len(argv) > 2: Concurrency=int(argv[2])
 startL,endL=0,0
-if len(argv) == 5: startL,endL=int(argv[3]),int(argv[4])
+if len(argv) ==5 : startL,endL=int(argv[3]),int(argv[4]) 
 srcScriptPath=argv[1]
 dstScriptPath=srcScriptPath+str(Concurrency)+"_parallelized.sh"
 
@@ -43,5 +44,9 @@ for line in bashLines[startL:endL]:
     i+=1
 
 if outLines[-1]!="wait\n": outLines.append("wait\n")    #last line assure is a wait
+
 #write modded lines
-open(dstScriptPath,"w").writelines(outLines)
+outFp=open(dstScriptPath,"w")
+if startL != 0: outFp.writelines(bashLines[:startL])
+outFp.writelines(outLines)
+outFp.close()
