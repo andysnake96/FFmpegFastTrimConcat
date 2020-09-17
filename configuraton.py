@@ -7,6 +7,9 @@ TMP_SEL_FILE="/tmp/selection.tmp.list.json"
 IMG_TUMBRL_EXTENSION = "jpg"
 VIDEO_MULTIMEDIA_EXTENSION = ["mp4", "wmw"]
 METADATA_EXTENSION = "json"
+##items scan
+SAVE_GENERATED_METADATA=True #save newly generated vids metadata
+if env.get("SAVE_GENERATED_METADATA") != None and "F" in env.get("SAVE_GENERATED_METADATA").upper():SAVE_GENERATED_METADATA=False
 # pool workers
 POOL_TRESHOLD = 100
 if "POOL_TRESHOLD" in env: POOL_TRESHOLD = int(env["POOL_TRESHOLD"])
@@ -39,12 +42,16 @@ SELECTION_FILE = "selection.list.json"
 TRIM_RM_SCRIPT = "trimReencodingless.sh"
 ### CONCAT SEGS
 CONCAT_FILELIST_FNAME,BASH_BATCH_SEGS_GEN,CONCAT_FILTER_FILE="concat.list","genSegs.sh","CONCAT_FILTER_FILE"
+
+
 # GROUP KEYS--------------------------
 GroupKeys = ["width", "height", "sample_aspect_ratio"]
 # groupKeys=["duration"]
-# ECLUDE KEYS-------------------------
+# EXCLUDE KEYS-------------------------
 # excludeGroupKeys=["bit_rate","nb_frames","tags","disposition","avg_frame_rate","color","index"]
 ExcludeGroupKeys = ["duration", "bit_rate", "nb", "tag", "disposition", "has", "avg", "col", "refs", "index"]
+
+
 PATH_SEP = ":"
 FFmpegNvidiaAwareDecode = " -vsync 0 -hwaccel cuvid -c:v h264_cuvid "
 FFmpegNvidiaAwareEncode = " -c:v h264_nvenc "

@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3
 # Copyright Andrea Di Iorio
 # This file is part of FFmpegFastTrimConcat
 # FFmpegFastTrimConcat is free software: you can redistribute it and/or modify
@@ -36,8 +36,11 @@ POOL_TRESHOLD <- jobs size threshold above which worker pool is used
 POOL_SIZE <-    worker pool size
 FORCE_METADATA_GEN -> (dflt True) force metadata generation for items
 """
-from json import loads, dumps
+from json import loads, dumps, dump
 
+from pwnlib.tubes.process import process
+
+#from GUI import guiMinimalStartGroupsMode
 from configuraton import  *
 from collections import namedtuple
 from os import environ,walk,path,system
@@ -74,7 +77,9 @@ class Vid:
         self.cutPoints = list()  # may hold cut times for segment generation as [[start,end],...]  (support for SelectItemPlay)
     def genMetadata(self):
         assert self.pathName!=None,"missing vid to gen metadata"
-        self.sizeB,self.metadata,self.duration= ffprobeMetadataGen(self.pathName)
+        self.sizeB,self.metadata,self.duration,metadataFull= ffprobeMetadataGen(self.pathName)
+        if SAVE_GENERATED_METADATA: self.saveFullMetadata(metadataFull)
+        else:                       return metadataFull
     def __str__(self):
         return "Item: path: " + self.pathName + " size: " + str(self.sizeB) + " imgPath: " + self.imgPath != None
 
@@ -88,7 +93,8 @@ class Vid:
         out = system(cmd+" 1>/dev/null 2>/dev/null &\n")
 
     def remove(self):
-        cmd = "rm " + self.pathName
+        cmd = "rm "
+        if self.pathName!=None: cmd+=" "+ self.pathName
         if self.imgPath!=None: cmd+=" " + self.imgPath
         if self.metadataPath!=None: cmd+=" " + self.metadataPath
         print(cmd)
@@ -106,6 +112,15 @@ class Vid:
         if deserializeDictJson: deserializedDict = loads(serializedDict)
         for k, v in deserializedDict.items(): setattr(self, k, v)
         return self
+
+    def saveFullMetadata(self,metadataFull):
+        """ save full metdata given about the current vid"""
+        dst = self.metadataPath
+        if dst == None: dst = "/tmp/" + self.pathName.split("/")[-1] + ".json"
+        dstFp = open(dst, "w")
+        dump(metadataFull, dstFp)
+        dstFp.close()
+
 
 ### (de) serialization of Vids list
 def SerializeSelectionSegments(selectedItems, filename=None):
@@ -144,9 +159,8 @@ def extractExtension(filename, PATH_ID,nameIdFirstDot=NameIdFirstDot):
     @return: extension,nameId
     """
     #extract filename from the given path
-    fname,fpath=filename,filename   
-    fnameIdx = fname.rfind("/") +1  #idx of start of fname (last "/") -> expected filename without /
-    if PATH_ID:        fname,fpath=filename[fnameIdx:],filename
+    fnameIdx = filename.rfind("/") +1  #idx of start of fname (last "/") -> expected filename without /
+    fname,fpath=filename[fnameIdx:],filename
     #try 4 char extension if not "." will be founded
     extension,nameID=  fname[-4:],fname[:-4] 
     extIndx = fname.rfind(".")  # last dot
@@ -167,7 +181,7 @@ def skipFname(extension):
     return skip
 
 
-def GetItems(rootPath=".", vidItems=dict(), PATH_ID=True,forceMetadataGen=FORCE_METADATA_GEN, limit=float("inf"), followlinks=True):
+def GetItems(rootPath=".", vidItems=dict(), PATH_ID=False,forceMetadataGen=FORCE_METADATA_GEN, limit=float("inf"), followlinks=True):
     """
     scan for vid objs from rootPathStr recursivelly
     will be builded a Vid objfor each founded group of files with the same nameID if the extension is in a defined set (see skipFname)
@@ -184,7 +198,6 @@ def GetItems(rootPath=".", vidItems=dict(), PATH_ID=True,forceMetadataGen=FORCE_
     @return: updated @vidItems dict with the newly founded vids
     """
     start = perf_counter()
-    metadataFilesQueue = list()  # list of items to parse metadata
     doubleCounter=0
     for root, directories, filenames in walk(rootPath, followlinks=followlinks):
         for filename in filenames:
@@ -202,30 +215,31 @@ def GetItems(rootPath=".", vidItems=dict(), PATH_ID=True,forceMetadataGen=FORCE_
                 item.imgPath = fpath
             elif METADATA_EXTENSION in extension:
                 item.metadataPath = fpath
-                metadataFilesQueue.append(item)
             else:  # some vid extension is present in filename
                 if item.pathName != None: print("already founded a vid with same nameID",item.pathName,fpath," ... overwriting field",file=stderr);doubleCounter+=1
                 item.pathName = fpath
                 item.extension=extension
 
             if len(vidItems) == limit:  print("reached", limit, "vid items ... breaking the recursive search");break
-    print("metadata file to read queue len:", len(metadataFilesQueue))
-    print("double nameID founded: ",doubleCounter)
+    missingPath= [i for i in vidItems.values() if i.pathName==None ]
+    missingMetdPath= [i for i in vidItems.values() if i.metadataPath == None and i.pathName!=None ]
+    metadataFilesQueue = [i for i in vidItems.values() if i.metadataPath != None and i.pathName!=None]
+    print("double nameID founded: ",doubleCounter,"tot num of items founded:",len(vidItems))
+    print("metadata file to read queue len:",len(metadataFilesQueue))
     if len(metadataFilesQueue) > POOL_TRESHOLD:
         # concurrent metadata files parse in order
         metadataFilesPathQueue = [i.metadataPath for i in metadataFilesQueue]
-        processed = list(
-            concurrentPoolProcess(metadataFilesPathQueue, parseMultimedialStreamsMetadata,"badJsonFormat",POOL_SIZE ))
+        processed = list(concurrentPoolProcess(metadataFilesPathQueue, parseMultimedialStreamsMetadata,"badJsonFormat",POOL_SIZE ))
         for i in range(len(metadataFilesQueue)):
             metadata, item = processed[i], metadataFilesQueue[i]
-            if metadata == None:  continue
+            if metadata == None or metadata[1]==None:
+                print("None metadata at ",item.metadataPath,file=stderr);continue
             item.sizeB, item.metadata, item.duration = metadata
     else:  # sequential version if num of jobs is too little -> only pickle/spawn/... overhead in pool
-        # in place vid obj fill with parsed data of metadata files enqueued
         for item in metadataFilesQueue:
             item.sizeB, item.metadata, item.duration = parseMultimedialStreamsMetadata(item.metadataPath)
 
-    if forceMetadataGen:  # generate missing metadata with run() calls + parse
+    if forceMetadataGen:  # generate missing metadata with run() calls -> ffprobe + parse
         metadataFilesQueue=         [ i for i in vidItems.values()  if i.metadata == None and i.pathName!= None  ]
         metadataFilesPathQueue =    [i.pathName for i in metadataFilesQueue]  # src vid files path to generate metadata
         print("metadata to gen queue len:", len(metadataFilesPathQueue))
@@ -234,9 +248,12 @@ def GetItems(rootPath=".", vidItems=dict(), PATH_ID=True,forceMetadataGen=FORCE_
             # manually set processed metadata fields (pool.map work on different copies of objs)
             for i in range(len(metadataFilesPathQueue)):
                 item, processedMetadata = metadataFilesQueue[i], processed[i]
-                if processedMetadata != None:     item.sizeB, item.metadata, item.duration = processedMetadata
+                if processedMetadata != None and processedMetadata[1]!=None:    #avaible at least metadata dict
+                    item.sizeB, item.metadata, item.duration,metadataFull = processedMetadata
+                    if SAVE_GENERATED_METADATA: item.saveFullMetadata(metadataFull)
+                else: print("invalid metadata gen at ",item.pathName,file=stderr)
         else:  # sequential version if num of jobs is too little -> only pickle/spawn/... overhead in pool
-            for item in metadataFilesQueue: item.genMetadata()
+            for item in metadataFilesQueue: item.genMetadata();
     end = perf_counter()
     print("founded Vids: ", len(vidItems), "in secs: ", end - start)
     return vidItems
@@ -302,7 +319,7 @@ def selectGroupTextMode(groups,joinGroupItems=True):
               "cumulativeSize MB:", cumulativeSize/2**20, "\ngrouppingKey hash:", hash(groupKeys[i]), "grouppingKey ", groupKeys[i])
     out = list()
     while len(out)==0:
-        selectedGroupIDs = input("enter either groups number space separated, ALL for all groups\t")
+        selectedGroupIDs = input("ENTER EITHER GROUPS NUMBER SPACE SEPARATED, ALL for all groups\t")
         if "ALL" in selectedGroupIDs: out = list(groups.values())
         else:
             for gid in selectedGroupIDs.split():
@@ -329,11 +346,16 @@ def FilterItems(items, pathPresent=True, tumbNailPresent=False, metadataPresent=
             if not keep or kw in i.pathName:
                 keep=False
                 break
-        if keep:    outList.append(i) 
+        if keep:    outList.append(i)
+
+
+        #if i.pathName==None: i.remove()    ##TODO DEL MISSING VIDEOS METADATA/TUMBNAILS##
         #LOG MISSING FIELDS
-        if i.pathName != "" and i.imgPath == "":print("Missing thumbnail at \t", i.nameID,file=stderr) #dump missinig tumbnails
-        if i.metadata==None:                    print("None metadata", i.nameID, file=stderr)
-        elif i.duration <= 0:                   print("invalid duration", i.duration, i.nameID, file=stderr)   #don't check dur if not metadata
+        if i.pathName == None: continue
+        if  i.imgPath == "":print("Missing thumbnail at \t", i.pathName,file=stderr) #dump missinig tumbnails
+        if i.metadata==None:                    print("None metadata", i.metadataPath, file=stderr)
+        elif i.duration <= 0 and i.metadataPath != None:
+            print("invalid duration", i.duration, i.metadataPath, file=stderr)   #don't check dur if not metadata
     print("filtered:",len(items) -len(outList))
     return outList
 ######

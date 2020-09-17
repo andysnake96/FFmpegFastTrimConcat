@@ -167,6 +167,7 @@ def FFmpegTrimConcatFlexible(itemsList,GenVideoCutSegmentsRndFunc, SEG_BUILD_MET
         for s in range(len(segsCmds)):
             outCmds.append(segsCmds[s]+"\n")
             if s%concurrencyLev == 0 and s>0: outCmds.append("wait\n")
+        if len(segsCmds)-1 % concurrencyLev != 0: outCmds.append("wait \n") #wait last segs
     else:
         outCmds=[cmd+"\n" for cmd in segsCmds]
     bashBatchSegGen.writelines(outCmds)

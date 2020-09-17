@@ -81,9 +81,8 @@ def GenVideoCutSegmentsRnd(item, segGenConfig=SegGenOptionsDflt, MORE_SEGN_THREA
     # gen random segs inside solts of time each with lenght = totDur/nSeg
     outSegs = list()  # list of [(startSegSec,endSegSec),...]
     segmentSlotLen = float(duration) / nSeg
-    if minSegLen > segmentSlotLen: print("bad config, minSegLen > seg slot len, decresing to 3");minSegLen = 3
-    if maxSegLen > segmentSlotLen: print(
-        "bad config, maxSegLen > seg slot len, decresing to slot len");maxSegLen = segmentSlotLen
+    if minSegLen > segmentSlotLen: print("minSegLen > seg slot len, decresing to min");     minSegLen = segmentSlotLen
+    if maxSegLen > segmentSlotLen: print("maxSegLen > seg slot len, decresing to max");     maxSegLen = segmentSlotLen
     slotStart = minStartConstr
     for x in range(nSeg):  # segment times genration in different slots NB minMax SegLen has to be setted correctly
         segLen = (random() * (maxSegLen - minSegLen)) + minSegLen
@@ -114,16 +113,20 @@ def argParseMinimal(args):
     parser.add_argument("--segsLenSecMin", type=int, default=None, help="")
     parser.add_argument("--maxSegN", type=int, default=None, help="")
     parser.add_argument("--groupSelectionMode", type=str,
-                        choices=["GUI_TUMBNAIL_SELECT", "TAKE_ALL_MOST_POPOLOUS","MULTI_GROUPS","GROUPS_ITEMS","ALL_MERGED"], default="GROUPS_ITEMS",
-                        help="mode of selecting groups to concat: GUI_TUMBNAIL_SELECT -> select item via avaible tumbnails in gui module\n"
-                             "TAKE_ALL_MOST_POPOLOUS -> take the most popolouse group,\nMULTI_GROUPS -> select multiple groups to apply segmnta. & concat separatelly\n ALL_MERGED -> operate on all founded items"
-                             "GROUPS_ITEMS -> select groups to applay segmnt. & concat togheter")
+                        choices=["TAKE_ALL_MOST_POPOLOUS","MULTI_GROUPS","GROUPS_ITEMS","ALL_MERGED","GUI_TUMBNAIL_SELECT"], default="GROUPS_ITEMS",
+                        help="mode of selecting groups to concat:\n"
+                             "TAKE_ALL_MOST_POPOLOUS -> take the most popolouse group,\nMULTI_GROUPS -> select multiple groups to apply segmnta. & concat separatelly\n"
+                             "MULTI_GROUPS-> select groups to applay segmnt & concat SEPARATELLY" \
+                             "GROUPS_ITEMS -> select groups to applay segmnt & concat TOGHETER" \
+                             "ALL_MERGED -> operate on all founded items \n"
+                             "GUI_TUMBNAIL_SELECT -> select item via avaible tumbnails in gui module\n")
     # parser.add_argument("--grouppingRule",type=str,default=ffmpegConcatDemuxerGroupping.__name__,choices=list(GrouppingFunctions.keys()),help="groupping mode of items")
-    parser.add_argument("--concurrencyLev", type=int, default=2,
+    parser.add_argument("--concurrencyLev", type=int, default=0,
                         help="concurrency in cutting operation (override env CONCURRENCY_LEVEL_FFMPEG_BUILD_SEGS)")
     parser.add_argument("--groupDirect", type=bool, default=False,
                         help="group metadata founded by direct groupping keys embedded in code")
-    parser.add_argument("--groupFiltering", type=str, default=None,choices=["len","dur","both"],help="filtering mode of groupped items: below len or duration threshold the group will be filtered away")
+    parser.add_argument("--groupFiltering", type=str, default=None,choices=["len","dur","both"],
+                        help="filtering mode of groupped items: below len or duration threshold (MIN_GROUP_LEN in configuration.py) the group will be filtered away")
     parser.add_argument("--justFFmpegConcatFilter", type=bool, default=False,
                         help="concat selected items with ffmpeg's concat filter")
     parser.add_argument("--genGroupFilenames", type=int, choices=[0, 1, 2], default=0,
@@ -149,7 +152,7 @@ if __name__ == "__main__":
     if PATH_SEP in nsArgParsed.pathStart: startPath = nsArgParsed.pathStart.split(PATH_SEP)
     mItemsDict, grouppingsOld = dict(), dict()
     for path in startPath:
-        mItemsDict = GetItems(path, mItemsDict, True)
+        mItemsDict = GetItems(path, mItemsDict, False)
     items=FilterItems(mItemsDict.values())
     ### GROUP VIDEOS BY COMMON PARAMS IN METADATA
     #either group excluding some metadata field, or group by specific field (groupDirect)
@@ -213,6 +216,7 @@ if __name__ == "__main__":
     if nsArgParsed.shuffle:
         for g in selectedGroups:    shuffle(g)
     for g in range(len(selectedGroups)):
+        print(">>:: Concatening group num ",g," ::<<")
         bash_batch_segs_gen, concat_filter_file, concat_filelist_fname = BASH_BATCH_SEGS_GEN + str(g), \
                                                                          CONCAT_FILTER_FILE + str(g), \
                                                                          CONCAT_FILELIST_FNAME + str(g)
@@ -222,4 +226,5 @@ if __name__ == "__main__":
             FFmpegTrimConcatFlexible(selectedGroups[g],GenVideoCutSegmentsRnd ,SEG_BUILD_METHOD=buildFFMPEG_segExtractNoReencode,
                                      segGenConfig=segGenConfig, \
                                      BASH_BATCH_SEGS_GEN=bash_batch_segs_gen,
-                                     CONCAT_FILELIST_FNAME=concat_filelist_fname, CONCAT_FILTER_FILE=concat_filter_file)
+                                     CONCAT_FILELIST_FNAME=concat_filelist_fname, CONCAT_FILTER_FILE=concat_filter_file,
+                                     CONCURERNCY_LEV_SEG_BUILD=nsArgParsed.concurrencyLev)

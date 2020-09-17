@@ -1,3 +1,4 @@
+#!/usr/bin/python3
 ###Vid metadata gen--parse
 from json import load, loads, dumps
 from multiprocessing.dummy import Pool
@@ -6,22 +7,32 @@ from random import shuffle
 from sys import stderr
 
 
+def to_tuple(lst):
+    """convert the given list to a tuple recursivelly"""""
+    for r in range(len(lst)):
+        i=lst[r]
+        if isinstance(i,list):      lst[r]= to_tuple(i)
+        elif isinstance(i,tuple):   lst[r]= to_tuple(list(i))
+        elif isinstance(i,dict):    lst[r]=tuple(i.items())
+    return tuple(lst)
 
-def ffprobeMetadataGen(vidPath, FFprobeJsonCmd="ffprobe -v quiet -print_format json -show_format -show_streams"):
-    """generate metadata for item  at given path with subprocess.run """
+def ffprobeMetadataGen(vidPath, FFprobeJsonCmd="ffprobe -v quiet -print_format json -show_format -show_streams -show_error"):
+    """generate metadata for item  at given path with subprocess.run
+        @return: vid size, streams'metadata dictionaries (with vid stream at 0th pos), vid duration in secods (float), metdata generated frmo ffprobe
+    """
     FFprobeJsonCmdSplitted = FFprobeJsonCmd.split(" ") + [vidPath]
     out = run(FFprobeJsonCmdSplitted, capture_output=True)
-    metadata = loads(out.stdout.decode())
-    return extractMetadataFFprobeJson(metadata)
+    metadataFull = loads(out.stdout.decode())
+    if metadataFull.get("error")!=None and ["error"]!=None and len(metadataFull)==1: print("error at ",vidPath,file=stderr);return None,None,None,None
+    return (*extractMetadataFFprobeJson(metadataFull),metadataFull)     #python3 required
 
 
 def extractMetadataFFprobeJson(metadata):
     """
     @param metadata: list of stream's metadata dictionary
-    @return: vid size, streams'metadata dictionaries (with vid stream at 0th pos), vid duration in secods (float)
+    @return: vid size, streams'metadata dictionaries (with vid stream at 0th pos), vid duration in secods (float), metdata generated frmo ffprobe
             None,None,None if misformed metadata
     """
-
     try:
         fileSize = int(metadata["format"]["size"])
         streamsDictMetadata = metadata["streams"]

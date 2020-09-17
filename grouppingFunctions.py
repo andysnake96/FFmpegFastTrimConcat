@@ -1,4 +1,8 @@
+
 ### Items Groupping Functions: Vid -> groupKey string
+from utils import to_tuple
+
+
 def GroupByMetadataValuesFlexible(item, groupKeysList, excludeOnKeylist=False, wildcardFieldMatch=True):
     """
     classify a Vid item by its metadata associating to it a key that can be used to group omogeneous vids togheter (FFmpeg concat demuxer , concatFilter)
@@ -40,7 +44,8 @@ def GroupByMetadataValuesFlexible(item, groupKeysList, excludeOnKeylist=False, w
                 if keepField:   outK.append(field)
             else:
                 if field in groupKeysList: outK.append((field, vidStreamMetadata[field]))
-    groupK = tuple(outK)
+    groupK = to_tuple(outK)
+    hash(groupK)
     return groupK
 
 ### managment groupping functions
