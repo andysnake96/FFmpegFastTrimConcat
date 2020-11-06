@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-# Copyright Andrea Di Iorio
+# Copyright Andrea Di Iorio 2020
 # This file is part of FFmpegFastTrimConcat
 # FFmpegFastTrimConcat is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -15,73 +15,89 @@
 # along with FFmpegFastTrimConcat.  If not, see <http://www.gnu.org/licenses/>.
 
 """
-This module define a struct for videos along with supporting informations in a classes Vid (tuplelist) Vid
-each of these item is identified by name ID that is a truncation of the file name up to first or last "." -> see NameIdFirstDot
-and has several field concerning metadatas and tumbnail preview -> separatelly stored in file with the same nameID but different extension in a fixed set
+This module define a struct for videos in class Vid,VidTuple
+Video struct fields:
+is identified by name ID that is a truncation of the file name up to first or last "."
+several field concerning metadatas and tumbnail preview 
+   separatelly stored in files with the same nameID but different extension (.json,.jpg,.gif)
+
 it's supported to store/get metadata as a json list of dict with infos per multimedial stream.
     also supported run time generation of metadata for a given video with subprocess.run method
+
 Main Exported Function:
-GetItems        ->      recursive search from a start dir, files buildining items along with NameIdFirstDot, returning a dict (nameID->itemObj)
-GetGroups       ->      gruop items, with a groupping function, that classify item with a KEY (e.g. resoulution, core metadata (fieldName,value)
-TrimSegmentsIterative  ->      iterativelly play item with an specified base cmd (default is ffplay), prompt for selection and segmentation time
-arg parse main for a managment of vids (invoking a minimal gui with a tumbnail prevs grid),  selection and trim vids
+GetItems                ->      recursive search from a start dir, files relative to Vid items
+GetGroups               ->      gruop Vids, with a groupping function
+TrimSegmentsIterative   ->      play items and prompt for selection and segmentation 
 ________________________________________________________________________________________________________________________
 ENVIRON OVERRIDE OPTIONS
-DISABLE_GUI   -> if True gui is disable (groups selection within the term)
-NameIdFirstDot -> (dflt True )filename truncated to first dot to extract file nameID/extension
-MIN_GROUP_SIZE -> min group size, bellow that the group will be filtered away
-MIN_GROUP_LEN-> min group len in seconds, bellow that the group will be filtered away
-POOL_TRESHOLD -> dflt 15 min jobs num to invoke pool map in place of standard map to avoid pickle/spawn/pool overhead on few data
-POOL_TRESHOLD <- jobs size threshold above which worker pool is used
-POOL_SIZE <-    worker pool size
-FORCE_METADATA_GEN -> (dflt True) force metadata generation for items
+DISABLE_GUI      [F] if True gui is disabled
+NameIdFirstDot   [T] filename truncated to first dot to extract file nameID/extension
+MIN_GROUP_SIZE   min group size, bellow that the group will be filtered away
+MIN_GROUP_LEN    min group len in seconds, bellow that the group will be filtered away
+POOL_TRESHOLD    [15] min jobs num to invoke pool map in place of standard map to avoid pickle/spawn/pool overhead on few data
+POOL_SIZE        worker pool size
+FORCE_METADATA_GEN  (dflt True) force metadata generation for items
 """
 from json import loads, dumps, dump
 
 from pwnlib.tubes.process import process
 
 #from GUI import guiMinimalStartGroupsMode
-from configuraton import  *
+from configuration import  *
 from collections import namedtuple
 from os import environ,walk,path,system
 from sys import argv,stderr
 from subprocess import run,Popen,DEVNULL
 from argparse import ArgumentParser
 
-from configuraton import DISABLE_GUI, MIN_GROUP_LEN
 from grouppingFunctions import *
 from time import perf_counter
 ### MODEL
 # lightweight namedtuple for the model
 from scriptGenerator import GenTrimReencodinglessScriptFFmpeg
-from utils import concurrentPoolProcess, parseMultimedialStreamsMetadata, ffprobeMetadataGen, parseTimeOffset, \
-     vidItemsSorter
+from utils import concurrentPoolProcess, parseMultimedialStreamsMetadata, \
+    ffprobeMetadataGen, parseTimeOffset,vidItemsSorter
 
-attributes = ["nameID", "pathName", "sizeB", "imgPath", "img", "metadataPath", "metadata", "duration", "extension","cutpoints"]
-# the cutpoints attribute may hold cut times for segment generation as [[start,end],...]  (support for TrimSegmentsIterative)
-defaults = ["", 0, None, None, None, None, 0, None, list()]
-VidTuple = namedtuple("Vid", attributes, defaults=defaults)
+
+if not DISABLE_GUI:  # try to enable GUI importing GUI module (with its tkinter dependencies ...)
+    try:
+        from GUI import *
+        print("GUI imported")
+    except Exception as e:
+        print("not importable GUI module", e)
+        DISABLE_GUI = True
+
+attributes = ["nameID","pathName", "sizeB", "gifPath","imgPath","metadataPath",\
+     "metadata","duration", "extension","cutPoints"]
+VidTuple = namedtuple("Vid", attributes)
 
 class Vid:
     """Video items attributes plus useful operation on an item"""
     def __init__(self, multimediaNameK,path=None):
         self.nameID = multimediaNameK  # AS UNIQUE ID -> MULTIMEDIA NAME (no path and no suffix)
+        #default init of other fields
         self.pathName =path
         self.sizeB = 0
+        self.gifPath = None
         self.imgPath = None
-        self.img = None
         self.metadataPath = None
         self.metadata =None #list of vid's strams metadata (ffprobe output)
         self.duration = 0  # num of secs for the duration
         self.extension = None
-        self.cutPoints = list()  # may hold cut times for segment generation as [[start,end],...]  (support for SelectItemPlay)
+        #cut times for segment generation as [[start,end],...]  (support for SelectItemPlay)
+        self.cutPoints = list()  
+
+    def __str__(self):
+        outS="Item: path: " + str(self.pathName) + " size: " + str(self.sizeB) + " imgPath: " + str(self.imgPath)
+        if self.gifPath!=None: outS+=" gifPath: "+self.gifPath
+        if QUIET_VID_LOG: outS="Item: "+ self.nameID
+        return outS
+
     def genMetadata(self):
         assert self.pathName!=None,"missing vid to gen metadata"
-        self.sizeB,self.metadata,self.duration,metadataFull= ffprobeMetadataGen(self.pathName)
+        self.sizeB,self.metadata,self.duration,metadataFull=ffprobeMetadataGen(self.pathName)
         if SAVE_GENERATED_METADATA: self.saveFullMetadata(metadataFull)
         else:                       return metadataFull
-    def __str__(self):
-        return "Item: path: " + self.pathName + " size: " + str(self.sizeB) + " imgPath: " + self.imgPath != None
 
     def play(self, playBaseCmd="ffplay -autoexit -fs "):
         """play the Vid with the given playBaseCmd given """
@@ -92,15 +108,20 @@ class Vid:
         #out = Popen(cmd.split(), stderr=DEVNULL, stdout=DEVNULL)
         out = system(cmd+" 1>/dev/null 2>/dev/null &\n")
 
-    def remove(self):
+    def remove(self,confirm=True):
+        #remove this item, if confirm ask confirmation onthe backed terminal
+        #return True if item actually removed
         cmd = "rm "
         if self.pathName!=None: cmd+=" "+ self.pathName
         if self.imgPath!=None: cmd+=" " + self.imgPath
         if self.metadataPath!=None: cmd+=" " + self.metadataPath
         print(cmd)
-        # out = Popen(cmd.split(), stderr=DEVNULL, stdout=DEVNULL).wait()
-        out = run(cmd.split())
-        print(out.returncode)
+        if confirm and "Y" in input(cmd+" ???(y||n)\t").upper():
+            # out = Popen(cmd.split(), stderr=DEVNULL, stdout=DEVNULL).wait()
+            out = run(cmd.split())
+            print("rm returned:",out.returncode)
+            return out.returncode==0
+        return False
 
     def fromJson(self, serializedDict, deserializeDictJson=False):
         """
@@ -113,13 +134,17 @@ class Vid:
         for k, v in deserializedDict.items(): setattr(self, k, v)
         return self
 
-    def saveFullMetadata(self,metadataFull):
-        """ save full metdata given about the current vid"""
+    def saveFullMetadata(self,metadata):
         dst = self.metadataPath
         if dst == None: dst = "/tmp/" + self.pathName.split("/")[-1] + ".json"
         dstFp = open(dst, "w")
-        dump(metadataFull, dstFp)
+
+        dump(metadata, dstFp)
         dstFp.close()
+    
+    def toTupleList():
+        return VidTuple(self.nameID,self.pathName,self.sizeB,self.gifPath,self.imgPath,\
+         self.metadataPath,self.metadata,self.duration,self.extension,self.cutPoints)
 
 
 ### (de) serialization of Vids list
@@ -147,15 +172,14 @@ def DeserializeSelectionSegments(serializedItemsStr):
     print("deserialized: ", len(out), " items")
     return out
 
-######
 ### Vid Item gather from filesystem
 def extractExtension(filename, PATH_ID,nameIdFirstDot=NameIdFirstDot):
     """
     extract the extension and nameID from filename
-    if
-    @param filename:        file    path if PATH_ID, otherwise just file name without dirs path. expected fnames without "/"
-    @param PATH_ID:         consider nameID=file path given in filename without the extension
-    @param nameIdFirstDot:  if true nameId will be extracted up to the first Dot ( dflt=last dot)
+    @param filename: filepath 
+    @param PATH_ID: consider nameID=filepath without the extension, otherwise
+        consider just filename without extension
+    @param nameIdFirstDot:  if true nameId will be extracted up to the first Dot
     @return: extension,nameId
     """
     #extract filename from the given path
@@ -167,17 +191,19 @@ def extractExtension(filename, PATH_ID,nameIdFirstDot=NameIdFirstDot):
     if extIndx != -1:
         if nameIdFirstDot:  extIndx = fname.find(".")  # first dot
         nameID, extension = fname[:extIndx], fname[extIndx + 1:]
-    if PATH_ID: nameID=fpath[:fnameIdx]+nameID         #concat path of file with the extracted nameID (extension(s) removed)
+    if PATH_ID: nameID=fpath[:fnameIdx]+nameID 
     return extension, nameID
 
 
 def skipFname(extension):
     """
-    #return True if given fname with the extracted extension don't match the IMG extension, METADATA extension or Video extension
+    return True if given fname with the extracted extension don't match any
+    extension of IMG , GIF, METADATA or Video 
     """
-    skip = not (IMG_TUMBRL_EXTENSION in extension or METADATA_EXTENSION in extension)
+    skip = not (GIF_TUMBRL_EXTENSION in extension or \
+         IMG_TUMBRL_EXTENSION in extension or METADATA_EXTENSION in extension)
     for ext in VIDEO_MULTIMEDIA_EXTENSION:
-        if not skip or ext in extension:    return False  # don't skip file with the fiven extension
+        if not skip or ext in extension:    return False
     return skip
 
 
@@ -258,6 +284,11 @@ def GetItems(rootPath=".", vidItems=dict(), PATH_ID=False,forceMetadataGen=FORCE
     print("founded Vids: ", len(vidItems), "in secs: ", end - start)
     return vidItems
 
+def ConvertItemsTuplelist(items):
+    #convert Vid items to Tuplelist
+    out=list()
+    for i in items: out.append(i.toTupleList())
+    return out
 
 def GetGroups(srcItems=None, grouppingRule=ffmpegConcatDemuxerGroupping, startSearch=".", filterTumbNailPresent=False):
     """
@@ -292,11 +323,13 @@ def FilterGroups(groups, minSize, mode="len"):
     filteredGroup=dict()
     for groupK,items in groups.items():
         keepGroup,keepGroupDur,keepGroupLen=False,False,False
-        if (mode == "len" or mode == "both") and len(items)>=minSize:                       keepGroupLen,keepGroup=True,True
-        if (mode == "dur" or mode == "both") and sum([i.duration for i in items])>=minSize: keepGroupDur,keepGroup=True,True
+        if (mode == "len" or mode == "both") and len(items)>=minSize:
+            keepGroupLen,keepGroup=True,True
+        if (mode == "dur" or mode == "both") and \
+            sum([i.duration for i in items])>=minSize: keepGroupDur,keepGroup=True,True
         if mode=="both":    keepGroup=keepGroupDur and keepGroupLen
 
-        if keepGroup:        filteredGroup[groupK]=items # if condition are meth keep the group otherwise filter it away
+        if keepGroup:        filteredGroup[groupK]=items
     return filteredGroup
 
 def selectGroupTextMode(groups,joinGroupItems=True):
@@ -309,18 +342,23 @@ def selectGroupTextMode(groups,joinGroupItems=True):
     """
     groupItems=list(groups.items())
     groupItems.sort(key=lambda g: len(g[1]), reverse=True)
-    groupKeys=[ g[0] for g in groupItems ]      #group keys sorted by relative items num
+    groupKeys=[g[0] for g in groupItems]
+    groupVals=[g[1] for g in groupItems]
+    #show groups
     for i in range(len(groupKeys)):
         cumulativeSize, cumulativeDur = 0, 0
         for item in groups[groupKeys[i]]:
             cumulativeDur += int(item.duration)
             cumulativeSize += int(item.sizeB)
-        print("\n\n::> group:", i, "numItem:", len(groups[groupKeys[i]]), "cumulative Duration Sec:", cumulativeDur,
-              "cumulativeSize MB:", cumulativeSize/2**20, "\ngrouppingKey hash:", hash(groupKeys[i]), "grouppingKey ", groupKeys[i])
+        print("\n\n::> group:", i, "numItem:", len(groups[groupKeys[i]]), \
+            "cumulative Duration Sec:", cumulativeDur,"cumulativeSize MB:",cumulativeSize/2**20,\
+            "\ngrouppingKey hash:",hash(groupKeys[i]), "grouppingKey ", groupKeys[i])
     out = list()
+    #select
     while len(out)==0:
-        selectedGroupIDs = input("ENTER EITHER GROUPS NUMBER SPACE SEPARATED, ALL for all groups\t")
-        if "ALL" in selectedGroupIDs: out = list(groups.values())
+        selectedGroupIDs = input("ENTER EITHER GROUPS NUMBER SPACE SEPARATED,\
+             ALL for all groups\t ")
+        if "ALL" in selectedGroupIDs.upper(): out = groupVals
         else:
             for gid in selectedGroupIDs.split():
                 if joinGroupItems:  out += groups[groupKeys[int(gid)]]
@@ -328,7 +366,8 @@ def selectGroupTextMode(groups,joinGroupItems=True):
     print("selected items: ",len(out))
     return out
 
-def FilterItems(items, pathPresent=True, tumbNailPresent=False, metadataPresent=True,durationPos=True,filterKW=FilterKW):
+def FilterItems(items, pathPresent=True, tumbNailPresent=False,\
+         metadataPresent=True,durationPos=True,filterKW=FilterKW):
     """
     filter items by the optional flags passed
     @param items: source items list
@@ -340,8 +379,11 @@ def FilterItems(items, pathPresent=True, tumbNailPresent=False, metadataPresent=
     """
     outList = list()
     for i in items:
-        keep=(not pathPresent or i.pathName != None) and (not tumbNailPresent or i.imgPath !=None) \
-                and (not metadataPresent or i.metadata !=None) and (not durationPos or i.duration>0) #true if correct fields in item
+        keep=       (not pathPresent or i.pathName != None) \
+                and (not tumbNailPresent or i.imgPath !=None) \
+                and (not metadataPresent or i.metadata !=None)\
+                and (not durationPos or i.duration>0)
+
         for kw in filterKW:
             if not keep or kw in i.pathName:
                 keep=False
@@ -351,8 +393,8 @@ def FilterItems(items, pathPresent=True, tumbNailPresent=False, metadataPresent=
 
         #if i.pathName==None: i.remove()    ##TODO DEL MISSING VIDEOS METADATA/TUMBNAILS##
         #LOG MISSING FIELDS
-        if i.pathName == None: continue
-        if  i.imgPath == "":print("Missing thumbnail at \t", i.pathName,file=stderr) #dump missinig tumbnails
+        if i.pathName == None: print("missing pathName at",i);continue
+        if i.imgPath == None:print("Missing thumbnail at \t", i.pathName,file=stderr) #dump missinig tumbnails
         if i.metadata==None:                    print("None metadata", i.metadataPath, file=stderr)
         elif i.duration <= 0 and i.metadataPath != None:
             print("invalid duration", i.duration, i.metadataPath, file=stderr)   #don't check dur if not metadata
@@ -393,7 +435,7 @@ def TrimSegmentsIterative(itemsList, skipNameList=None, dfltStartPoint=None, dfl
         elif end < 0:               end = item.duration + end
 
         # iteration play-selection loop
-        item.play(" vlc ")
+        item.play(" mpv --hwdec=auto ")
         if len(item.cutPoints)>0:
             print("curr cutPoints:\t", _printCutPoints(item.cutPoints))
             #drawSegmentsTurtle([item]) #TODO turtle.Terminator
@@ -409,10 +451,10 @@ def TrimSegmentsIterative(itemsList, skipNameList=None, dfltStartPoint=None, dfl
         segmentationPoints = list()  # new segmentation points for the vid
         tmpSelectionBackup=open(TMP_SEL_FILE,"w")
         replay=True
-        while replay:
+        while replay:   
             replay=False
             try:
-                for f in range(len(fields)):
+                for f in range(len(fields)):#TODO separate parsing logic for simple GUI call
                     # parse cmd fields
                     fieldCurr = fields[f].lower()
                     if "start" in fieldCurr or "s" in fieldCurr:
@@ -461,7 +503,7 @@ def argParseMinimal(args):
                         "MERGE ->  these items with their cutpoints to the new items, then go totrim selection loop, "
                         "REVISION -> overwrite cut points of the old selected items, not search for other vids")
     parser.add_argument("--videoTrimOldSelectionFile", type=str, default=None,help="ols json serialized selection file")
-    parser.add_argument("--dstCutDir", type=str, default=None,help="dir where to save trimmed segments, default same dir of source vids")
+    parser.add_argument("--dstCutDir", type=str, default="cuts",help="dir where to save trimmed segments, default same dir of source vids")
     parser.add_argument("--videoTrimSelectionStartTime", type=float, default=None,help="default start time for the selected video in ITERATIVE_TRIM_SELECT operating Mode")
     parser.add_argument("--videoTrimSelectionEndTime", type=float, default=None,help="default end time for the selected video in ITERATIVE_TRIM_SELECT operating Mode, if negative added to the end of current vid in selection...")
     parser.add_argument("--videoTrimSelectionOutput", type=int, default=2, choices=[0, 1, 2],

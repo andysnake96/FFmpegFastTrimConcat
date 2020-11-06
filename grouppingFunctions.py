@@ -1,8 +1,8 @@
 
-### Items Groupping Functions: Vid -> groupKey string
 from utils import to_tuple
+from configuration import *
 
-
+### Items Groupping Functions: Vid -> groupKey string
 def GroupByMetadataValuesFlexible(item, groupKeysList, excludeOnKeylist=False, wildcardFieldMatch=True):
     """
     classify a Vid item by its metadata associating to it a key that can be used to group omogeneous vids togheter (FFmpeg concat demuxer , concatFilter)
@@ -49,13 +49,27 @@ def GroupByMetadataValuesFlexible(item, groupKeysList, excludeOnKeylist=False, w
     return groupK
 
 ### managment groupping functions
-def sizeBatching(item,groupByteSize=(100*(2**20))): #group by size in batch of 500MB(dflt) each
+def sizeBatching(item,groupByteSize=(100*(2**20))): 
+    #group by size in batch of 500MB(dflt) each
     return str(groupByteSize/2**20)+"MB_Group:\t"+ str(item.sizeB // groupByteSize)
-def durationBatching(item,groupMinNum=5):           #group by duration in batch of 5 min(dflt) each
+def durationBatching(item,groupMinNum=5):
+    #group by duration in batch of 5 min(dflt) each
     return str(groupMinNum*(item.duration // (60*groupMinNum)))+" ~Min_Group"
+
 def ffprobeExtractResolution(item):                 #just get resolution  +SAR
     return str(item.metadata[0]["width"])+" X "+str(item.metadata[0]["height"])+" SAR "+str(item.metadata[0]["sample_aspect_ratio"])
-def ffmpegConcatDemuxerGroupping(item):#label element to group them by metadata s.t. they may be concateneted with the concat demuxer
-    return GroupByMetadataValuesFlexible(item,["duration", "bit_rate", "nb_frames", "tags", "disposition", "avg_frame_rate", "color"],True,True)
+
+def ffmpegConcatDemuxerGroupping(items):
+    #try to group items on common metadata values (expressed field to not consider)
+    #may be suitable for the ffmpeg's concat demuxer
+    return GroupByMetadataValuesFlexible(items,ExcludeGroupKeys,\
+        excludeOnKeylist=True,wildcardFieldMatch=True)
+
+def ffmpegConcatFilterGroupping(items):
+    #try to group items on common metadata values 
+    #may be suitable for the ffmpeg's concat filter
+    return GroupByMetadataValuesFlexible(items,GroupKeys,\
+        excludeOnKeylist=False,wildcardFieldMatch=False)
+
 #dict of groupFuncName -> groupFunc
 GrouppingFunctions={ f.__name__ : f for f in [ffprobeExtractResolution,ffmpegConcatDemuxerGroupping,sizeBatching,durationBatching]}

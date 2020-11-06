@@ -2,15 +2,15 @@ from collections import namedtuple
 from random import shuffle
 
 ##TODO from MultimediaManagementSys import VidTuple
-from configuraton import FFMPEG, Decode, Encode
-#from MultimediaManagementSys import VidTuple
+from configuration import *
 from utils import cleanPathname, parseTimeOffset
-
-SegGenOptionsDflt = {"segsLenSecMin": None, "segsLenSecMax": None, "maxSegN": 1, "minStartConstr": 0,"maxEndConstr": None}
+SegGenOptionsDflt = {"segsLenSecMin": None, "segsLenSecMax": None, "maxSegN": 1,
+     "minStartConstr": 0,"maxEndConstr": None}
 
 # python3 -c from MultimediaManagementSys import *; SegGenOptionsDflt['maxEndConstr']=-5;GenPlayIterativeScript(DeserializeSelectionSegments(open('selection.list').read()),outFilePath='selectionPlaySegs.sh')
 
-def GenPlayIterativeScript(items, baseCmd="ffplay -autoexit ", segGenConfig=SegGenOptionsDflt, outFilePath=None):
+def GenPlayIterativeScript(items, baseCmd="ffplay -autoexit ",
+    segGenConfig=SegGenOptionsDflt, outFilePath=None):
     """generate a bash script to play all items selected segments
        if no segmenet embedded inside Vid -> play the whole video
        UC review a serialized selection file
@@ -29,7 +29,8 @@ def GenPlayIterativeScript(items, baseCmd="ffplay -autoexit ", segGenConfig=SegG
                 if s[1] != None: end = s[1]
                 # if end<=0:end+=i.duration
                 print(end, s[0], "\n")
-                t = parseTimeOffset(end, True) - parseTimeOffset(s[0],True)  # compute end with duration from seeked start
+                # compute end with duration from seeked start
+                t = parseTimeOffset(end, True) - parseTimeOffset(s[0],True)  
                 playCmd += " -t " + str(t)
                 playCmd += " -window_title '" + str(j) + "  " + i.nameID + "'"
                 playCmd += " '" + i.pathName + "'\n"
@@ -49,41 +50,50 @@ def GenPlayIterativeScript(items, baseCmd="ffplay -autoexit ", segGenConfig=SegG
     return outLines
 
 
-# TODO ffmpeg any accurateSeek  + avoid_negative_ts make_zero -> initial null glitch
-def GenTrimReencodinglessScriptFFmpeg(items, accurateSeek=False, outFname=None):
-    """ generate a bash script to trim items by their embedded cutpoints
-        video cut will be done with ffmpeg -ss -to -c copy (reencodingless video/audio out) -avoid_negative_ts 1 (ts back to 0 in cutted)
-        video segements cutted will be written in the same path of source items with appended .1 .2 ... .numOfSegments
-        if accurateSeek given True will be seeked as ffmpeg output option-> -i inFilePath before -ss,-to
-        if outFname given, the script will be written in that path, otherwise printed to stdout
-
-        outFnames written in subfolder of created dir cuts like cuts/itemNameID
+def GenTrimReencodinglessScriptFFmpeg(items, accurateSeek=False, outFname=None,
+    dstCutDir="cuts"):
+    """ 
+        generate a bash script to trim items by their embedded cutpoints
+        video cut will be done with ffmpeg -ss -to -c copy -avoid_negative_ts 1
+        (reencodingless video/audio out + ts back to 0 in cutted)
+        video segements cutted will be written like in ..dstCutDir/itemNameID/.1.mp4 ...
+        with appended .1 .2 ... .numOfSegments
+        @param accurateSeek: if True will be seeked as ffmpeg output option
+            (-i inFilePath -ss -to instead of -ss -to -i inFilePath )
+        @param outFname: if True, the generated script will be written in that path, 
+            otherwise printed to stdout
+        @param dstCutDir: path of 
     """
+    #clean dstCutDir
+    dstCutDir=dstCutDir.strip()
+    if dstCutDir[-1]=="/": dstCutDir=dstCutDir[:-1]
+
     outLines = list()
-    outLines.append("mkdir cuts\n")
-    outLines.append("FFMPEG=/home/andysnake/ffmpeg/bin/nv/ffmpeg_g  #set custom ffmpeg path here\n")
+    outLines.append("mkdir "+dstCutDir+" \n")
+    outLines.append("FFMPEG=/home/andysnake/ffmpeg/bin/nv/ffmpeg_g #custom ffmpeg\n")
     for i in items:
-        cutSubDir=" cuts/"+i.nameID+"/"
+        cutSubDir=dstCutDir+"/"+i.nameID+"/"
         outLines.append("mkdir '"+cutSubDir+"'\n")
         cutPointsNum = len(i.cutPoints)
-        if cutPointsNum == 0: continue  # skip items without segments  -> no trimming required
-        outLines.append("\n#SEGMENTS OF " + i.pathName + "\n")  
-        outLines.append("\nmkdir cuts/" + i.nameID+ "\n")
+        if cutPointsNum == 0: continue 
+
+        outLines.append("\n#SEGMENTS OF " + i.pathName + str(i.duration)+"\n")  
         ffmpegInputPath = " -i '" + i.pathName+"' "
         # for each segments embedded generate ffmpeg -ss -to -c copy ...
         for s in range(cutPointsNum):
             seg = i.cutPoints[s]
             trimSegCmd = "eval $FFMPEG -loglevel error -hide_banner -n"
-            if accurateSeek: trimSegCmd += ffmpegInputPath
+            if accurateSeek: trimSegCmd += ffmpegInputPath     #seek as output opt
             trimSegCmd += " -ss " + str(seg[0])
             if seg[1] != None: trimSegCmd += " -to " + str(seg[1])
-            if not accurateSeek: trimSegCmd += ffmpegInputPath  # seek as output option
-            # trimSegCmd+=" \t-c copy -avoid_negative_ts 1 "           #handle shifting of time stamps
-            trimSegCmd += " -c copy -avoid_negative_ts make_zero "  # handle shifting of time stamps
-            dstPath= "'"+cutSubDir+i.pathName.split("/")[-1]+ "." + str(s) + ".mp4'"  # progressive suffix for segments to generate
+            if not accurateSeek: trimSegCmd += ffmpegInputPath #seek as input opt
+            trimSegCmd += " -c copy -avoid_negative_ts make_zero " #shift ts
+            #name seg file with progressive suffix
+            dstPath= "'"+cutSubDir+i.pathName.split("/")[-1]+ "." + str(s) + ".mp4'"  
             trimSegCmd+=dstPath
             outLines.append(trimSegCmd + "\n")
         outLines.append("#rm " + i.pathName + "\n")  # commented remove cmd for currnt vid
+
     if outFname != None:
         fp = open(outFname, "w")
         fp.writelines(outLines)
@@ -94,7 +104,7 @@ def GenTrimReencodinglessScriptFFmpeg(items, accurateSeek=False, outFname=None):
 ### SEG CUT CMD GEN
 #RE-ENCODINGLESS
 ## cut a selected segment of video with seek options as input or output(more accurate ??)
-buildFFMPEG_segExtractNoReencode=       lambda pathName,segStart,segTo,destPath:"eval $FFMPEG" +" -ss " + str(segStart) +" -to " + str(segTo) +" -i '" + pathName +"' -c copy -avoid_negative_ts make_zero " + cleanPathname(destPath)
+buildFFMPEG_segExtractNoReencode=lambda pathName,segStart,segTo,destPath:"eval $FFMPEG" +" -ss " + str(segStart) +" -to " + str(segTo) +" -i '" + pathName +"' -c copy -avoid_negative_ts make_zero " + cleanPathname(destPath)
 buildFFMPEG_segExtractPreciseNoReencode=lambda pathName,segStart,segTo,destPath:"eval $FFMPEG" +" -i '" + pathName+"' -ss " + str(segStart) +" -to " + str(segTo)  +" -c copy -avoid_negative_ts make_zero " + cleanPathname(destPath)
 #RE-ENCODING
 buildFFMPEG_segTrimPreSeek=lambda pathName,segStart,segTo,destPath:FFMPEG+" -ss "+str(segStart)+" -i "+pathName+" -vf trim="+str(segStart)+":"+str(segTo)+Encode+"'"+destPath+"'" #trim filter
@@ -102,61 +112,74 @@ buildFFMPEG_segTrim=lambda pathName,segStart,segTo,destPath:FFMPEG+Decode+" -ss 
 buildFFMPEG_segExtract_reencode=lambda pathName,segStart,segTo,destPath: FFMPEG+Decode+" -ss "+str(segStart)+" -to "+str(segTo)+" -i '"+pathName+"'"+Encode+"'"+destPath+"'"    #seek and re encode
 ##
 ##FFMPEG CONCAT DEMUXER
-def FFmpegTrimConcatFlexible(itemsList,GenVideoCutSegmentsRndFunc, SEG_BUILD_METHOD=buildFFMPEG_segExtractNoReencode, segGenConfig=SegGenOptionsDflt,
-                             **opts):
+def FFmpegTrimConcatFlexible(itemsList,SEG_BUILD_METHOD=buildFFMPEG_segExtractNoReencode, 
+    segGenConfig=SegGenOptionsDflt,**opts):
     """
-        Cut segments from vids in itemsList then merge back via concatenation generating bash scripts
-        basically the script will write generated segments in tmpCut/vidNameID/i.mp4  where i is in 0...n, n=# segs for vid
-        @param itemsList:           vids to cut in segments, that segments will be concatenated togeter.
-            cut segments will be generated with GenVideoCutSegmentsRnd
-            if an item already have defined segs in its cutPoints field, them will be used to trim the vid
-        @param GenVideoCutSegmentsRndFunc: function that take a Vid item and SegGenConfig to configure the random segment exrtaction from item
-        @param SEG_BUILD_METHOD:    function used to gen the video segment in the BASH_BATCH_SEGS_GEN script
-        @param segGenConfig:        segment generation configuration
-        @param opts:  mode:         either CONCAT_DEMUXER, CONCAT_FILTER, ALL -> select concat modality
-                      script names: BASH_BATCH_SEGS_GEN, CONCAT_FILELIST_FNAME,CONCAT_FILTER_FILE
-                                -> respectivelly for cut script gen, concat demuxer list file, concatFilter script gen
-                      var:          STORE_SEGMENTATION_INFO -> store rnd generated segments inside items
-                                    CONCURERNCY_LEV_SEG_BUILD  -> level of concurrency used in trimming
+    Cut segments from vids in itemsList 
+    then merge back via concatenation generating bash scripts
+    basically the script will write generated segments in tmpCut/vidNameID/i.mp4 
+    where i is in 0...n, n=# segs for vid
+
+    @param itemsList:  vids to cut in segments, if an item already have 
+        defined segs in its cutPoints field, them will be used to trim the vid
+    @param GenVideoSegRndFunc: 
+        func such that Vid,SegGenConfig -> segment specification for the vid
+    @param SEG_BUILD_METHOD: func used to gen the video segment in the script
+    @param segGenConfig: segment generation configuration
+    @param opts:  
+     script names: BASH_BATCH_SEGS_GEN, CONCAT_FILELIST_FNAME,CONCAT_FILTER_FILE
+      (respectivelly for cut script gen, concat demuxer list file,
+      concatFilter script gen)
+     var:  CONCURERNCY_LEV_SEG_BUILD-> ammount of concurrent ffmpeg trim cmds
     """
+    if DEBUG: print(segGenConfig,opts,SEG_BUILD_METHOD)
     # parse opts
-    bash_batch_segs_gen,concatDemuxerList,concatFilter="segsBuild.sh","concat.list","concatFilter.sh"
-    if opts.get("BASH_BATCH_SEGS_GEN") != None:         bash_batch_segs_gen = opts["BASH_BATCH_SEGS_GEN"]
-    if opts.get("CONCAT_FILELIST_FNAME") != None:       concatDemuxerList = opts["CONCAT_FILELIST_FNAME"]
-    if opts.get("CONCAT_FILTER_FILE") != None:          concatFilter= opts["CONCAT_FILTER_FILE"]
-    storeSegmentationChoiced = False
-    if opts.get("STORE_SEGMENTATION_INFO") != None:     storeSegmentationChoiced = opts["STORE_SEGMENTATION_INFO"]
+    bash_batch_segs_gen,concatDemuxerList,concatFilter=\
+    "segsBuild.sh","concat.list","concatFilter.sh"
+    if opts.get("BASH_BATCH_SEGS_GEN")!=None:
+        bash_batch_segs_gen = opts["BASH_BATCH_SEGS_GEN"]
+    if opts.get("CONCAT_FILELIST_FNAME")!=None:
+        concatDemuxerList = opts["CONCAT_FILELIST_FNAME"]
+    if opts.get("CONCAT_FILTER_FILE")!=None:
+        concatFilter= opts["CONCAT_FILTER_FILE"]
     concurrencyLev=0
-    if opts.get("CONCURERNCY_LEV_SEG_BUILD") != None: concurrencyLev= opts["CONCURERNCY_LEV_SEG_BUILD"]
-    concatMode="CONCAT_DEMUXER"
-    if opts.get("MODE") != None:    concatMode=opts["MODE"]
-    assert concatMode in ["CONCAT_DEMUXER", "CONCAT_FILTER", "ALL"],"invalid concat mode given"
+    if opts.get("CONCURERNCY_LEV_SEG_BUILD")!=None:
+        concurrencyLev= int(opts["CONCURERNCY_LEV_SEG_BUILD"])
+
     ### SEG GEN
-    TRAIL_CMD_SUFFIX = ""
-    if concurrencyLev > 0: TRAIL_CMD_SUFFIX = " &"
-    segInfoTup=namedtuple("segInfo","trgtPath trimCmd")          #info 1 segment
-    itemTrimInfoTup=namedtuple("itemTrimInfo","vid segsDir segs")#info about an item with its segments (segs is a list of segInfoTup)
+    TRAIL= ""
+    if concurrencyLev > 0: TRAIL= " &"
+    segInfoTup=namedtuple("segInfo","trgtPath trimCmd")          #segment
+    itemTrimInfoTup=namedtuple("itemTrimInfo","vid segsDir segs")#item+list of segInfoTup
     itemsTrimList=list()
     for item in itemsList:
-        assert not ( item.pathName == "" or item.sizeB == 0),"skip malformed itmes"
-        #gen segs for vid item if not already defined in cutPoints field
+        assert not ( item.pathName == "" or item.sizeB == 0 ),"malformed itme"
+
         segs = item.cutPoints
-        if len(segs)==0:        segs =  GenVideoCutSegmentsRndFunc(item, segGenConfig)
-        if storeSegmentationChoiced:    item.cutPoints = segs  # store segments generated for current item
+        if len(segs)==0:        
+            segs=segGenConfig["genSegFunc"](item, segGenConfig)
+            item.cutPoints = segs 
+
         trgtDir = "tmpCut/" + item.nameID
         segsInfos=list()
         for s in range(len(segs)):
-            trgtSegDestPathName = trgtDir + "/" + str(s) + "." + item.extension #incresing num fname per segs
             start, to = segs[s][0], segs[s][1]
-            assert int(start) in range(0,int(item.duration)+1) and int(to) in range(0,int(item.duration)+1),"invalid segments outside vid duration boundaries"
-            ffmpegCutCmd= SEG_BUILD_METHOD(item.pathName, start, to, trgtSegDestPathName) + TRAIL_CMD_SUFFIX
-            # interleave build cmd with wait to concurrency build fixed num of vids
-            segsInfos.append(segInfoTup(trgtSegDestPathName,ffmpegCutCmd))
-        itemsTrimList.append(itemTrimInfoTup(item,trgtDir,segsInfos))
+
+            assert int(start) in range(0,int(item.duration)+1) and \
+             int(to) in range(0,int(item.duration)+1),"seg outside len boundaries"
+
+            dstSegPath = trgtDir + "/" + str(s) + "." + item.extension 
+            ffmpegCutCmd=SEG_BUILD_METHOD(item.pathName, start, to, dstSegPath)+TRAIL
+            if DEBUG: print(ffmpegCutCmd)
+            segsInfos.append(segInfoTup(dstSegPath,ffmpegCutCmd))#add seg
+    
+        itemsTrimList.append(itemTrimInfoTup(item,trgtDir,segsInfos))#add item+segs
+
     # write bash ffmpeg build segs
     bashBatchSegGen = open(bash_batch_segs_gen, "w")
     #preliminar cmds: tmp dir of tmpfs(optional), remove previous dir same named if any
-    bashBatchSegGen.write("export FFMPEG=\""+FFMPEG+"\"\nmkdir tmpCut\n#sudo mount -t tmpfs none tmpCut\n")
+    bashBatchSegGen.write("export FFMPEG=\""+FFMPEG+
+        "\"\nmkdir tmpCut\n#sudo mount -t tmpfs none tmpCut o size=6G,noatime\n")
     bashBatchSegGen.write("#rm -r tmpCut/*\n")
     #directories for the segments to cut
     bashBatchSegGen.writelines(["mkdir '"+item.segsDir+"'\n" for item in itemsTrimList])
@@ -164,7 +187,7 @@ def FFmpegTrimConcatFlexible(itemsList,GenVideoCutSegmentsRndFunc, SEG_BUILD_MET
     segsCmds=[seg.trimCmd for item in itemsTrimList for seg in item.segs]   #extract trim cmds
     if concurrencyLev > 0:
         outCmds=list()
-        for s in range(len(segsCmds)):
+        for s in range(len(segsCmds)):  
             outCmds.append(segsCmds[s]+"\n")
             if s%concurrencyLev == 0 and s>0: outCmds.append("wait\n")
         if len(segsCmds)-1 % concurrencyLev != 0: outCmds.append("wait \n") #wait last segs
@@ -176,58 +199,67 @@ def FFmpegTrimConcatFlexible(itemsList,GenVideoCutSegmentsRndFunc, SEG_BUILD_MET
     segsFpathList=["file\t"+seg.trgtPath +"\n" for item in itemsTrimList for seg in item.segs]
     shuffle(segsFpathList)
     ### CONCAT
-    if concatMode in ["ALL","CONCAT_DEMUXER"]:
-        file = open(concatDemuxerList, "w")
-        file.writelines(segsFpathList)
-        file.close()
-    elif concatMode in ["ALL","CONCAT_FILTER"]:
-        segsItemsMock=[VidTuple(item.nameID,seg.trgtPath) for item in itemsTrimList for seg in item.segs]
-        cmd=concatFilterCmd(segsItemsMock,ONTHEFLY_PIPE=False)
-        file = open(concatFilter, "w")
-        file.write(cmd)
-        file.close()
+    file = open(concatDemuxerList, "w")
+    file.writelines(segsFpathList)
+    file.close()
 
 ##FFMPEG CONCAT FILTER
 MULTILINE_OUT = True
-def concatFilterCmd(items, outFname="/tmp/out.mp4", ONTHEFLY_PIPE=True, PIPE_FORMAT="matroska", HwDecoding=False):
+def concatFilterCmd(items, outFname="/tmp/out.mp4", onthefly_pipe=True,
+    PIPE_FORMAT="matroska", HwDecoding=False):
     """
     generate ffmpeg concat filter cmd string, to concat the given items
+    each item will be cutted accordingly to its cutPoints field (if not empty)
     @param items: list of vids items to concat
     @param HwDecoding: flag to enable hw decoding on each vid
-    optional output to a pipe to ffplay ( ffmpeg ... - | ffplay -) can be selected with ONTHEFLY_PIPE and PIPE_FORMAT
+    @param onthefly_pipe: output to a pipe to ffplay ( ffmpeg ... - | ffplay -) 
+        PIPE_FORMAT has to be a container format that support pipe output
     """
     outStrCmd = FFMPEG
     inputsFiles = list()  # list of input lines
-    numInputs = len(items)
     for i in items:
-        itemLine = " -i '" + i.pathName + "'\t"
-        inputsFiles.append(itemLine)
-    shuffle(inputsFiles)  # shuf segment list as input operand
+        itemLine = " -i '" + i.pathName +"' \t"
+        #add cut points (if any)
+        segs=i.cutPoints
+        for s in segs:
+            inputsFiles.append("\t -ss "+str(s[0])+"\t -to "+str(s[1])+itemLine)
+        #check if not added any input yet
+        if len(segs)==0:    inputsFiles.append(itemLine)
     prfx = "\\\n"
     if HwDecoding: prfx += Decode  # HW decoding for each input vid
-    inputBlock = prfx + prfx.join(inputsFiles)
-    outStrCmd += inputBlock + "\\\n"
+    outStrCmd += prfx + prfx.join(inputsFiles) + "\\\n"
     # gen concat filter streams string [1][2]..
-    concatFilterInStreamsString = ""
-    for x in range(numInputs): concatFilterInStreamsString += "[" + str(x) + "]"
-    outStrCmd += ' -filter_complex "' + concatFilterInStreamsString + "concat=n=" + str(numInputs) + ':v=1:a=1"'
+    concatFStreamsStr = ""
+    for x in range(len(items)): concatFStreamsStr+= "[" + str(x) + "]"
+    outStrCmd += ' -filter_complex "' + concatFStreamsStr+\
+         "concat=n=" + str(len(items)) + ':v=1:a=1"'
     outStrCmd += " -vsync 2"
     targetOutput = " " + outFname
     outStrCmd += Encode
-    if ONTHEFLY_PIPE: targetOutput = " -f " + PIPE_FORMAT + " - | ffplay - "  # on the fly generate and play with ffplay
+    if onthefly_pipe: targetOutput = " -f " + PIPE_FORMAT + " - | ffplay - "
     outStrCmd += targetOutput
     return outStrCmd
 
 
-def FFmpegConcatFilter(itemsList, outScriptFname, onTheFlayFFPlay=False, maxConcatSize=50 * 2 ** 20, maxConcatDur=500):
+def FFmpegConcatFilter(itemsList, outScriptFname, segGenConfig=None,
+    onTheFlayFFPlay=False,maxConcatSize=MAX_CONCAT_SIZE, maxConcatDur=MAX_CONCAT_DUR):
     """
     concat list of Vid items using the ffmpeg concat filter,
      considering subsets of elements with a max size/dur (pretty MEM intensive..)
-     these subset of consecutive elements will be concatenated with in separate script
+     these subset will be concatenated with in separate script.
+     if items given own some cutPoints, will be prefixed ffmpeg'sinput option
+
     @param itemsList:       list of Vid items to concat
-    @param maxConcatSize:   max cumulative size of items to concat, elements in the order given in itemsList afther reached this threshold will be discarded
-    @param maxConcatDur:    max cumulative duration of items to concat, elements in the order given in itemsList afther reached this threshold will be discarded
-    @param outScriptFname:  output bash script name base name. will be created 1 script for each item's subset under the given thresholds
+    @param maxConcatSize:   max cumulative size of items to concat, 
+        elements in the order given in itemsList afther reached this threshold
+        will be discarded
+    @param segGenConfig:    segment generation config (constraints +genFunc)
+        if not None, segs will be generated for each item 
+    @param maxConcatDur:    max cumulative duration of items to concat, 
+        elements in the order given in itemsList afther reached this threshold 
+        will be discarded
+    @param outScriptFname:  output bash script name base name. will be created 
+        1 script for each item's subset under the given thresholds
     @param onTheFlayFFPlay: concat output written to a pipe to ffplay
     """
     itemsPathsGroups = list()
@@ -235,18 +267,38 @@ def FFmpegConcatFilter(itemsList, outScriptFname, onTheFlayFFPlay=False, maxConc
     cumulativeSize, cumulativeDur = 0, 0
     for item in itemsList:
         # flush in single concat script items that have exceeded the thresholds
-        if cumulativeDur + item.duration > maxConcatDur or cumulativeSize + item.sizeB > maxConcatSize:
+        if cumulativeDur + item.duration > maxConcatDur or\
+            cumulativeSize + item.sizeB > maxConcatSize:
             itemsPathsGroups.append(group)
             group = list()
+        if segGenConfig!=None and len(item.cutPoints)==0: #gen seg if required
+            item.cutPoints=segGenConfig["genSegFunc"](item,segGenConfig)
         group.append(item)
     if len(group) > 0: itemsPathsGroups.append(group)   #add last group
+
     # for each group write a single concat filter script
     for i in range(len(itemsPathsGroups)):
+        nameSuffix=str(i)
+        if i==0: nameSuffix=""
+
         itemsPaths = itemsPathsGroups[i]
-        outFp = open(outScriptFname + str(i), "w")
-        ffmpegConcatFilterCmd = concatFilterCmd(itemsPaths, ONTHEFLY_PIPE=onTheFlayFFPlay,outFname="/tmp/out" + str(i) + outScriptFname + ".mp4")
+        outFp = open(outScriptFname + nameSuffix, "w")
+        ffmpegConcatFilterCmd = concatFilterCmd(itemsPaths, outFname="/tmp/out"
+            + nameSuffix + outScriptFname + ".mp4",onthefly_pipe=onTheFlayFFPlay,)
         outFp.write(ffmpegConcatFilterCmd)
         outFp.close()
 
 
 
+if __name__=="__main__":
+    ## FULL COVERAGE AUTO FUNCS CALL
+    import sys
+    thismodule = sys.modules[__name__]
+    emptyF=lambda x:x
+    print("module attributes")
+    for x in dir(): print(x,type(getattr(thismodule,x)))
+    print("calling all functions")
+    functions=[getattr(thismodule,x) for x in dir() if type(getattr(thismodule,x)) == type(emptyF)]
+    for f in functions: 
+        try: f()
+        except: print()

@@ -30,21 +30,20 @@ ENCODE: str for encode out video (dflt Nvidia h264 in FFmpegNvidiaAwareEncode)
 DECODE: str for decode in video (dflt Nvidia h264 in FFmpegNvidiaAwareDecode)
 FFMPEG: target ffmpeg build to use (dflt Nvidia builded one )
 """
-from configuraton import *
+from configuration import *
 from copy import deepcopy
 from os import environ as env
 import argparse
 from random import random, randint, shuffle
 from collections import namedtuple
 from MultimediaManagementSys import *
-from scriptGenerator import FFmpegTrimConcatFlexible, FFmpegConcatFilter, buildFFMPEG_segExtractPreciseNoReencode, buildFFMPEG_segExtractNoReencode
-
+#from scriptGenerator import FFmpegTrimConcatFlexible, FFmpegConcatFilter, buildFFMPEG_segExtractPreciseNoReencode, buildFFMPEG_segExtractNoReencode
+from scriptGenerator import *
+from utils import printList
 if not DISABLE_GUI:    from GUI import *
 ### Vid Seg Cutting Flexible
-# constr specification
-SegGenOptionsDflt = {"segsLenSecMin": None, "segsLenSecMax": None, "maxSegN": 1, "minStartConstr": 0,"maxEndConstr": None}
 
-def GenVideoCutSegmentsRnd(item, segGenConfig=SegGenOptionsDflt, MORE_SEGN_THREASHOLD_DUR_SEC=596):
+def GenVideoCutSegmentsRnd(item, segGenConfig, MORE_SEGN_THREASHOLD_DUR_SEC=596):
     """
     generate random segment identified by start/end time point as [(s1Start,s1End),(s2Start,s2End),...]
     multiple segment will be allocated in different portions of the vid
@@ -57,6 +56,7 @@ def GenVideoCutSegmentsRnd(item, segGenConfig=SegGenOptionsDflt, MORE_SEGN_THREA
     @param MORE_SEGN_THREASHOLD_DUR_SEC: threshold of duration, above witch will be selected to cut maxSegN segments
     @return: list of [(startSegSec,endSegSec),...]
     """
+    outSegs = list()  # list of [(startSegSec,endSegSec),...]
     #### get seg gen option in vars
     maxEndConstr = segGenConfig["maxEndConstr"]
     minStartConstr = segGenConfig["minStartConstr"]
@@ -67,22 +67,23 @@ def GenVideoCutSegmentsRnd(item, segGenConfig=SegGenOptionsDflt, MORE_SEGN_THREA
     assert duration > 0 and minStartConstr >= 0, "invalid config"
     ## time constraint in segment in cut
     if duration > minStartConstr: duration -= minStartConstr  # remove first part to skip
+    else:                         minStartConstr=0            # start constr too big for the vid                              
     if maxEndConstr != None:
         if maxEndConstr > 0 and maxEndConstr < duration:
             duration = maxEndConstr - minStartConstr
         elif maxEndConstr < 0 and duration + maxEndConstr > 0:
             duration += maxEndConstr  # negative end constr
-    # if max/min seg len is None => get the full possible duration [NB pre costrained ]
-    if maxSegLen == None: maxSegLen = duration
-    if minSegLen == None: minSegLen = duration
-
+    
+    #TODO evaluate nseg reduce on slot too litle ?? 
+    ##tries=maxSegLen
+    ##segmentSlotLen=0
+    ##while tries > 0 and segmentSlotLen == 0 (or < thres ):
     nSeg = randint(1, maxSegN)
     if MORE_SEGN_THREASHOLD_DUR_SEC > 0 and duration >= MORE_SEGN_THREASHOLD_DUR_SEC: nSeg = maxSegN
     # gen random segs inside solts of time each with lenght = totDur/nSeg
-    outSegs = list()  # list of [(startSegSec,endSegSec),...]
     segmentSlotLen = float(duration) / nSeg
-    if minSegLen > segmentSlotLen: print("minSegLen > seg slot len, decresing to min");     minSegLen = segmentSlotLen
-    if maxSegLen > segmentSlotLen: print("maxSegLen > seg slot len, decresing to max");     maxSegLen = segmentSlotLen
+    if maxSegLen == None or maxSegLen > segmentSlotLen: print("maxSegLen > seg slot len, decresing to it");                 maxSegLen = segmentSlotLen
+    if minSegLen == None or minSegLen > segmentSlotLen: print("minSegLen > seg slot len, decresing to largest possible");   minSegLen = maxSegLen
     slotStart = minStartConstr
     for x in range(nSeg):  # segment times genration in different slots NB minMax SegLen has to be setted correctly
         segLen = (random() * (maxSegLen - minSegLen)) + minSegLen
@@ -91,9 +92,12 @@ def GenVideoCutSegmentsRnd(item, segGenConfig=SegGenOptionsDflt, MORE_SEGN_THREA
         ###alloc generated segment
         segEndOut = segStart + segLen
         outSegs.append((segStart, segEndOut))
-        slotStart += segmentSlotLen
+        slotStart = (x+1)*segmentSlotLen
     return outSegs
 
+
+SegGenOptionsDflt = {"segsLenSecMin": None, "segsLenSecMax": None, "maxSegN": 1,
+    "minStartConstr": 0,"maxEndConstr": None,"genSegFunc":GenVideoCutSegmentsRnd}
 
 def _select_items_group(items, keyGroup):
     global SelectedGroupK
@@ -113,7 +117,7 @@ def argParseMinimal(args):
     parser.add_argument("--segsLenSecMin", type=int, default=None, help="")
     parser.add_argument("--maxSegN", type=int, default=None, help="")
     parser.add_argument("--groupSelectionMode", type=str,
-                        choices=["TAKE_ALL_MOST_POPOLOUS","MULTI_GROUPS","GROUPS_ITEMS","ALL_MERGED","GUI_TUMBNAIL_SELECT"], default="GROUPS_ITEMS",
+                        choices=["TAKE_ALL_MOST_POPOLOUS","MULTI_GROUPS","GROUPS_ITEMS","ALL_MERGED","GUI_TUMBNAIL_SELECT"], default="MULTI_GROUPS",
                         help="mode of selecting groups to concat:\n"
                              "TAKE_ALL_MOST_POPOLOUS -> take the most popolouse group,\nMULTI_GROUPS -> select multiple groups to apply segmnta. & concat separatelly\n"
                              "MULTI_GROUPS-> select groups to applay segmnt & concat SEPARATELLY" \
@@ -123,15 +127,13 @@ def argParseMinimal(args):
     # parser.add_argument("--grouppingRule",type=str,default=ffmpegConcatDemuxerGroupping.__name__,choices=list(GrouppingFunctions.keys()),help="groupping mode of items")
     parser.add_argument("--concurrencyLev", type=int, default=0,
                         help="concurrency in cutting operation (override env CONCURRENCY_LEVEL_FFMPEG_BUILD_SEGS)")
-    parser.add_argument("--groupDirect", type=bool, default=False,
-                        help="group metadata founded by direct groupping keys embedded in code")
+    parser.add_argument("--groupConcatFilter", type=bool, default=False,
+                        help="concat selected items with ffmpeg's concat filter[dflt concat demuxer]")
     parser.add_argument("--groupFiltering", type=str, default=None,choices=["len","dur","both"],
                         help="filtering mode of groupped items: below len or duration threshold (MIN_GROUP_LEN in configuration.py) the group will be filtered away")
-    parser.add_argument("--justFFmpegConcatFilter", type=bool, default=False,
-                        help="concat selected items with ffmpeg's concat filter")
     parser.add_argument("--genGroupFilenames", type=int, choices=[0, 1, 2], default=0,
                         help="gen newline separated list of file paths for each founded group: 0=OFF,1=ON,2=JUST GEN groupFnames, no segmentation, cumulative time is logged before each file path with a line starting with #")
-    parser.add_argument("--shuffle", type=bool, default=True,help="shuffle order of item concat")
+    parser.add_argument("--shuffle", type=bool, default=False,help="shuffle order of item concat, default OFF and sort item by size")
     return parser.parse_args(args)
 
 
@@ -155,10 +157,10 @@ if __name__ == "__main__":
         mItemsDict = GetItems(path, mItemsDict, False)
     items=FilterItems(mItemsDict.values())
     ### GROUP VIDEOS BY COMMON PARAMS IN METADATA
-    #either group excluding some metadata field, or group by specific field (groupDirect)
+    #either group excluding some metadata field, or group by specific field (groupConcatFilter)
     excludeOnKeyList, wildcardMatch = True, True
     groupFields = ExcludeGroupKeys
-    if nsArgParsed.groupDirect:
+    if nsArgParsed.groupConcatFilter:
         excludeOnKeyList, wildcardMatch = False, False
         groupFields = GroupKeys
     grouppings = dict() #groupKey -> items
@@ -179,10 +181,11 @@ if __name__ == "__main__":
     assert len(itemsGroupped) > 0, "filtered all groups,change groupping params"
     ###WRITE GROUPS IN LIST FILES
     if nsArgParsed.genGroupFilenames != 0:  # build group filename listing if requested
-        groupFileLinePrefix = GENGROUPFILENAMESPREFIX
+        groupFileLinePrefix = "file "
         for i in range(len(itemsGroupped)):
             groupID, itemsList = itemsGroupped[i]
             if nsArgParsed.shuffle: shuffle(itemsList)
+            else: itemsList.sort(key=item.sizeB)
             outGroupFileName = "group_" + str(i) + ".list"
             file = open(outGroupFileName, "w")
             file.write("#" + str(groupID) + "\n")
@@ -192,16 +195,14 @@ if __name__ == "__main__":
                 file.write(groupFileLinePrefix + " " + item.pathName + "\n")
                 durCumul += item.duration
             file.close()
-    if nsArgParsed.genGroupFilenames == 2: exit(0)  # asked to exit after group file generation
+    if nsArgParsed.genGroupFilenames == 2: exit(0)#exit after groups generation
     mostPopolousGroup, mostPopolousGroupKey = itemsGroupped[0][1], itemsGroupped[0][0]
 
     ### SELECT TARGET GROUPPABLE ITEMS
-    selectedGroups=list()           #groups list to applay segs & concat separatelly
+    selectedGroups=list()      #groups list to applay segs & concat separatelly
     if Take == "GROUPS_ITEMS":
-        if not DISABLE_GUI:         selection = guiMinimalStartGroupsMode(grouppings, trgtAction=SelectWholeGroup)
-        else:                       selection = selectGroupTextMode(grouppings)
+        selection = selectGroupTextMode(grouppings)
     elif Take == "MULTI_GROUPS":
-        #if not DISABLE_GUI:         selection = guiMinimalStartGroupsMode(grouppings, trgtAction=SelectWholeGroup) #TODO GUI
         selectedGroups = selectGroupTextMode(grouppings,joinGroupItems=False)
     elif Take == "GUI_TUMBNAIL_SELECT":
         assert not DISABLE_GUI,"not avaible gui"
@@ -216,15 +217,18 @@ if __name__ == "__main__":
     if nsArgParsed.shuffle:
         for g in selectedGroups:    shuffle(g)
     for g in range(len(selectedGroups)):
-        print(">>:: Concatening group num ",g," ::<<")
-        bash_batch_segs_gen, concat_filter_file, concat_filelist_fname = BASH_BATCH_SEGS_GEN + str(g), \
-                                                                         CONCAT_FILTER_FILE + str(g), \
-                                                                         CONCAT_FILELIST_FNAME + str(g)
-        if nsArgParsed.justFFmpegConcatFilter:
-            FFmpegConcatFilter(selectedGroups[g], concat_filter_file)
+        print("\n>>:: Concatening group num ",g,"[",len(selectedGroups[g])," elem]  ::<<")
+        #printList(selectedGroups[g])
+
+        bash_batch_segs_gen, concat_filter_file, concat_filelist_fname =\
+        BASH_BATCH_SEGS_GEN+str(g), CONCAT_FILTER_FILE+str(g), CONCAT_FILELIST_FNAME+str(g)
+
+        if nsArgParsed.groupConcatFilter:
+            FFmpegConcatFilter(selectedGroups[g], concat_filter_file,segGenConfig)
         else:
-            FFmpegTrimConcatFlexible(selectedGroups[g],GenVideoCutSegmentsRnd ,SEG_BUILD_METHOD=buildFFMPEG_segExtractNoReencode,
-                                     segGenConfig=segGenConfig, \
-                                     BASH_BATCH_SEGS_GEN=bash_batch_segs_gen,
-                                     CONCAT_FILELIST_FNAME=concat_filelist_fname, CONCAT_FILTER_FILE=concat_filter_file,
-                                     CONCURERNCY_LEV_SEG_BUILD=nsArgParsed.concurrencyLev)
+            FFmpegTrimConcatFlexible(selectedGroups[g],\
+              SEG_BUILD_METHOD=buildFFMPEG_segExtractNoReencode,\
+              segGenConfig=segGenConfig,BASH_BATCH_SEGS_GEN=bash_batch_segs_gen,\
+              CONCAT_FILELIST_FNAME=concat_filelist_fname,\
+              CONCAT_FILTER_FILE=concat_filter_file,\
+              CONCURERNCY_LEV_SEG_BUILD=nsArgParsed.concurrencyLev)

@@ -183,7 +183,7 @@ def vidItemsSorter(itemsSrc, sortMethod):
     elif sortMethod == "shuffle":
         shuffle(itemsSrc)
     else:
-        print("not founded sorting method")
+        raise Exception("not founded sorting method")
 
 
 def cleanPathname(name, disableExtensionForce=False, extensionTarget=".mp4"):
@@ -195,3 +195,18 @@ def cleanPathname(name, disableExtensionForce=False, extensionTarget=".mp4"):
         name=name[:-1]+extensionTarget+"'"
     return name
 
+if __name__=="__main__":
+    ## FULL COVERAGE AUTO FUNCS CALL
+    import sys
+    thismodule = sys.modules[__name__]
+    emptyF=lambda x:x
+    print("module attributes")
+    for x in dir(): print(x,type(getattr(thismodule,x)))
+    print("calling all functions")
+    functions=[getattr(thismodule,x) for x in dir() if type(getattr(thismodule,x)) == type(emptyF)]
+    for f in functions: 
+        try: f()
+        except: print()
+
+#var
+printList = lambda l: list(map(print, l))  # basic print list, return [None,...]
