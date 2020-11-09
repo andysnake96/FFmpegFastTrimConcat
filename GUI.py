@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-#Copyright Andrea Di Iorio
+#Copyright Andrea Di Iorio 2020
 #This file is part of FFmpegFastTrimConcat
 #FFmpegFastTrimConcat is free software: you can redistribute it and/or modify
 #it under the terms of the GNU General Public License as published by
