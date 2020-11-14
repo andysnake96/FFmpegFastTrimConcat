@@ -16,6 +16,8 @@
 #
 from MultimediaManagementSys import *
 from grouppingFunctions import sizeBatching
+from utils import printList
+from configuration import MAX_FRAME_N
 
 import tkinter as tk
 from tkinter import messagebox
@@ -25,7 +27,8 @@ from os import environ as env
 from copy import copy
 from time import perf_counter,ctime
 from sys import stderr
-from utils import printList
+from collections import namedtuple
+
 SelectedList = list()       #selection modified by GUI 
 #helper to (de)highlight a button
 btnSel=lambda btn: btn.config(highlightbackground="red",highlightcolor= "red",\
@@ -34,6 +37,9 @@ btnOff=lambda btn: btn.config(highlightbackground="black",highlightcolor="black"
   highlightthickness=BTN_NN_SELECTED_THICKNESS,borderwidth=BTN_NN_SELECTED_THICKNESS)
 ##global vars supporting this GUI
 RootTk=None
+pgN =0  #page (subset) of items to grid
+stopGifsUpdate=False #set to true when to stop the gifs update
+
 #global flags touched by the user
 #PlayMode= tk.BooleanVar()
 #RemoveModeEnable=tk.BooleanVar()
@@ -195,72 +201,115 @@ class VerticalScrolledFrame(tk.Frame):
 
         canvas.bind('<Configure>', _configure_canvas)
 
+PreviewTuple=namedtuple("PreviewTuple","showObj tumbnail gif")
 
-font = ("Arial", 15, "bold")
-def _getImage(imgPath): 
-    out=None
-    if imgPath=="":     return out
-    #try:                    out=ImageTk.PhotoImage(Image.open(imgPath))  
-    try:                    out=Image.open(imgPath)
-    except Exception as e:  print("invalid img at: ",imgPath,"\t\t",e)
-    return out
+####gif refresh functions
+def getFrames(gifPath,max_frame_n=MAX_FRAME_N):
+    gif=Image.open(gifPath)
+    frames=list()
+    for x in range(max_frame_n): 
+        frames.append(ImageTk.PhotoImage(gif.copy().convert("RGBA")))
+        try:             gif.seek(x+1)
+        except EOFError: break        #reached EOF file
+    return frames
+    
 
-pageN = -1
-MainFrame = None
+def update(gifs,root):
+    global stopGifsUpdate 
+    if stopGifsUpdate: return   #TODO SUB WINDOW CLOSE EVENT -> SET THIS FLAG!!!
 
-def _nextPage(root=None, nextItems=None):
-    global pageN, items
-    if nextItems == None: nextItems = items
-    pageN += 1
-    if pageN > len(items) / ITEMS_LIMIT: pageN = 0  # circular next page
-    print("nextPage is:", pageN)
-    nextPage.configure(text="nextPage: "+str(pageN))
-    drawItems(nextItems, ITEMS_LIMIT * pageN, root=root)
+    for g in gifs:
+        frameIdx=g.frameIdxRef[0]
+        frame = g.frames[frameIdx]
+        framesN=len(g.frames)
+        g.frameIdxRef[0]=(frameIdx+1)%framesN
+        g.showObj[0].configure(image=frame)
+        
+        if DEBUG:   print("showObj id:",id(g.showObj[0]))
+    root.after(96, update,gifs,root)
+
+GifMetadTuple=namedtuple("GifMetadata","frames frameIdxRef showObj ")
+
+####
+def _getPreview(path,refObj,getGif=False):
+    #fill a PreviewTuple with the img or gif if @getGif parsed at @path
+
+    assert path!="","NULLPATH"
+    
+    if getGif!=None:
+        gif=GifMetadTuple(getFrames(path),[0],[refObj])
+        return PreviewTuple(refObj,None,gif)
+    
+    try:                    
+        img=Image.open(path) #img=ImageTk.PhotoImage(Image.open(imgPath))  
+
+    except Exception as e:  print("invalid prev at: ",path,"\t\t",e)
+    return PreviewTuple(refObj,img,None)
 
 
-def drawItems(items, itemsStart=0, itemsToDrawLimit=ITEMS_LIMIT, \
-        FILTER_PATH_NULL=True, filterSize=0, root=None):
+def _nextPage(items,drawGif,sFrame):
+    #stub to draw a page of items with global var pgN 
+    global pgN
+    if pgN*GUI_ITEMS_LIMIT > len(items): pgN = 0  # circular next page
+
+    drawItems(items[pgN*GUI_ITEMS_LIMIT:(pgN+1)*GUI_ITEMS_LIMIT],drawGif,sFrame)
+
+    pgN += 1
+    print("nextpgNumber :", pgN)
+    nextPage.configure(text="nextPage: "+str(pgN))
+
+
+def drawItems(items,drawGif,mainFrame):
     """
-        drap items's tumbnails images starting from index @itemsStart til
+        @items: items to draw, either as gifs to refresh or just tumbnails 
+        @mainFrame: VerticalScrolledFrame root to put items elements
+        @drawGif: draw and refresh periodically gifs in item.gifPath
+                  otherwise use images at item.imgPath 
         @itemsToDrawLimit. also filtering of images to actually display possible
     """
-    global MainFrame, RootTk
     global btns, imgs
-    if MainFrame != None:                MainFrame.destroy()
-    if root == None: root = RootTk
-    MainFrame = VerticalScrolledFrame(root)
-    MainFrame.grid()
-    btns = dict()
-    imgs = list()
-    i,row, col,colSize= 0,6, 0,GUI_COLSIZE
+    gifs,imgs = list(),list()
+
+    i,row, col,colSize=0,2,0,GUI_COLSIZE #aux indexes to progressivelly grid items
     
     start=perf_counter()
-    itemsTarget=items[itemsStart:itemsStart + itemsToDrawLimit]
-    imgsArgs=[ i.imgPath for i in itemsTarget]  #imgs path 
-    if len(imgsArgs)>POOL_TRESHOLD: #multi process image parsing
-        print("worker pool concurrent image parsing")
-        processed=list(concurrentPoolProcess(imgsArgs,_getImage,"badTumbNail",POOL_SIZE))
-    else:   processed=list(map(_getImage,imgsArgs))  #serial
+    
+    btns={ it.nameID:tk.Button(mainFrame.interior) for it in items }
+    prevArgs=list() #preview path,target tkinter show object
+    if drawGif:
+        prevArgs=[ (items[i].gifPath,btns[items[i].nameID]) for i in range(len(items))]
+    else:   
+        prevArgs=[ (items[i].imgPath,btns[items[i].nameID]) for i in range(len(items))]
 
-    for  i in range(len(itemsTarget)):
-        mitem=itemsTarget[i]
-        funcTmp = partial(_select, mitem)   #BIND FUNCTION FOR SELECTION
-        try: tumbrl=ImageTk.PhotoImage(processed[i])
-        except Exception as e: tumbrl=None;print("ImgParseErr:",e,file=stderr)
+    if len(prevArgs)>POOL_TRESHOLD: #multi process image parsing
+          print("worker pool concurrent image parsing")
+          processed=list(concurrentPoolProcess(prevArgs,_getPreview,"badTumbNail",POOL_SIZE))
+    else: processed=list(map(lambda args: _getPreview(*args),prevArgs))  #serial, unpack args
+    
+    #fill buttons with preview parsed [concurrently]
+    for p in range(len(processed)):
+        prevTup=processed[p]
+        item=items[p]
+        btn=prevTup.showObj
+        img,gif=prevTup.tumbnail,prevTup.gif
+        funcTmp = partial(_select, item)   #BIND FUNCTION FOR SELECTION
+
+        txt = ""
+        if item.duration != 0: txt += "len secs\t" + str(item.duration)
+        if item.sizeB != 0:    txt += "\nsize bytes\t" + str(item.sizeB)
         
-        if tumbrl!=None:
-            txt = ""
-            if mitem.duration != 0: txt += "len secs\t" + str(mitem.duration)
-            if mitem.sizeB != 0:    txt += "\nsize bytes\t" + str(mitem.sizeB)
-            btn = tk.Button(MainFrame.interior, image=tumbrl, text=txt, \
-                compound="center",fg="white", command=funcTmp, font=font)
-            imgs.append(tumbrl) #avoid garbage collector to free the parsed imgs
-            btns[mitem.nameID]=btn
+        if drawGif:
+            btn.configure(command=funcTmp,text=txt, \
+                compound="center",fg="white", font=font)
+            gifs.append(gif)
         else:
-            print("skipped item",mitem.imgPath,mitem.pathName,mitem.nameID)
-            continue
+            try: tumbrl=ImageTk.PhotoImage(processed[i])
+            except Exception as e: print("ImgParseErr:",e,item.imgPath,file=stderr);continue
+            btn.configure(command=funcTmp,image=tumbrl, text=txt, \
+                compound="center",fg="white", font=font)
+            imgs.append(tumbrl) #avoid garbage collector to free the parsed imgs
 
-        if VERBOSE: print("Adding:",mitem.nameID, mitem.imgPath, row, col, i)
+        if DEBUG: print("Adding:",item.nameID,"showObj id:", id(btn), row, col, i)
         btn.grid(row=row, column=col)
         col += 1;i += 1
         if col >= colSize:
@@ -268,121 +317,150 @@ def drawItems(items, itemsStart=0, itemsToDrawLimit=ITEMS_LIMIT, \
             row += 1
 
     end=perf_counter()
-    print("drawed: ",len(imgs),"in secs: ",end-start)
+    print("drawed: ",max(len(gifs),len(imgs)),"in secs: ",end-start)
+    
+    if drawGif :
+        assert len(gifs)>0,"empty gif set -> nothing to show!"
+        mainFrame.interior.after_idle(update,gifs,mainFrame)
     # root.mainloop()
 
 
 
 ### GUI CORE
-def itemsGridViewStart(itemsSrc,sort="size"):
+def itemsGridViewStart(itemsSrc,subWindow=False,drawGif=False,sort="size"):
     """
     start a grid view of the given items in the global tk root (new if None)
-    @param itemsSrc: items to show in the grid view
-    @param sort: items sorting, either: duration,size,sizeName,shuffle,nameID
+    @itemsSrc: items to show in the grid view
+    @subWindow:draw gui elements in a subwindow 
+        if root not exist, will be created as a standard empty window
+    @drawGif: draw gif instead of img 
+    @sort: items sorting, either: duration,size,sizeName,shuffle,nameID
     When tkinter root closed, Returns SelectedList of items
     """
-    #sort either size,duration
-    global nextPage, RootTk,items, RemoveModeEnable
+    global nextPage, items, RemoveModeEnable
     global PlayMode, SegSelectionMode, SegSelectionTimes, DeleteGroupKeepOne
     
-    items=FilterItems(itemsSrc,tumbNailPresent=True)
-    #items=[i for i in itemsSrc if i != None and i.pathName!=None and i.imgPath!=None]
+    #get the gui tkinter container window for the element to grid inside
+    root=None
+    if subWindow:   root=tk.Toplevel()
+    else:           root=tk.Tk()
+    # root.resizable(True,True)
+
+    items=None
+    if drawGif:     items=FilterItems(itemsSrc,gifPresent=True)
+    else:           items=FilterItems(itemsSrc,tumbNailPresent=True)
+    
+    if DEBUG:       print("items to draw:");printList(items)
+    #items=[i for i in itemsSrc if i!=None and i.pathName!=None and i.imgPath!=None]
     vidItemsSorter(items,sort)        #sort with the target method
     
-    #TODO root tk
-    # if tk root already defined -> create a new root for a new window
-    if RootTk == None:  root = RootTk = tk.Tk()
-    else:               root = tk.Toplevel(RootTk)  # shoud create a new window
-    # root.resizable(True,True)
     
-    ##global flags for the user 
+    ##global flags for the user, used in _select, when an item is selected 
     PlayMode= tk.BooleanVar()
     RemoveModeEnable=tk.BooleanVar()
     DeleteGroupKeepOne=tk.BooleanVar()
     SegSelectionMode = tk.IntVar()
     SegSelectionTimes = tk.Entry(root)
-
-
-
-    np = partial(_nextPage, root) #TODO partial(_nextPage, root,itemsSrc) 
-    nextPage = tk.Button(root, command=np, text="nextPage", background="yellow")
+    
+    sFrame=VerticalScrolledFrame(root)
+    nextPg = partial(_nextPage,items,drawGif,sFrame)
+    nextPage = tk.Button(root, command=nextPg, text="nextPage", background="yellow")
     nextPage.grid(row=0, column=0)
+
     flushBtn = tk.Button(root, command=_flushSelectedItems,\
         text="printSelectedMItems", background="green")
-    flushBtn.grid(row=1, column=0)
+    flushBtn.grid(row=0, column=1)  #flush items selected (print + file write)
 
     segSelectionEnable = tk.Checkbutton(root, text="segSelectionEnable",\
         variable=SegSelectionMode) #TODO also flush->add: , command=_flushSelectedItems)
-    segSelectionEnable.grid(row=2, column=0)
+    segSelectionEnable.grid(row=1, column=0)
+
     SegSelectionTimes.insert(0, "10 30")
-    SegSelectionTimes.grid(row=2, column=1)
+    SegSelectionTimes.grid(row=1, column=1)
+
     playModeEnable= tk.Checkbutton(root, text="play",variable=PlayMode,\
-        width=10,heigh=4,background="green")
-    playModeEnable.grid(row=3, column=0)
-    #remove UI logic
+        background="green")
+    playModeEnable.grid(row=0, column=2)
+
+    #remove items UI logic
     remMode= tk.Checkbutton(root, text="remove mode",variable=RemoveModeEnable)
-    remMode.grid(row=4,column=0)
+    remMode.grid(row=0,column=3)
     delGroup= tk.Checkbutton(root, text="DelGroupKeepOne",variable=DeleteGroupKeepOne)
-    delGroup.grid(row=4,column=1)
+    delGroup.grid(row=0,column=4)
     remSel=partial(_removeSelected,SelectedList)
     delSelection=tk.Button(root,command=remSel, text="DEL-SELECTION",background="red")
-    delSelection.grid(row=5, column=0)
+    delSelection.grid(row=0, column=5)
 
-    _nextPage(root=root)
+    sFrame.grid()
+
+    nextPg()
     root.mainloop()
+
     return SelectedList
 
-def guiMinimalStartGroupsMode(groupsStart=None,prefix=" ",sortOnGroupLen=True,\
-        trgtAction=itemsGridViewStart, grouppingRule=sizeBatching,startSearch="."):
-    """ @param groupsStart: dict of k-->itemsGroup to show on selection,
+def guiMinimalStartGroupsMode(groupsStart=None,grouppingRule=sizeBatching,\
+        trgtAction=itemsGridViewStart,trgtActionExtraArgs=[],drawGif=False, \
+        startSearch=".",sortOnGroupLen=True):
+    """ @groupsStart: dict of k-->itemsGroup to show on selection,
             if None, group items founded from @startSearch with @grouppingRule
-        @param trgtAction: function to call on group selection: items -> display
-        @param grouppingRule: if required, how to group items founded 
+        @grouppingRule: if required, how to group items founded 
             from @startSearch
+        @drawGif: if True, displayed gifs instead of tumbnails
+        @trgtAction: func to call on group select: items,[extraArgs] -> display
+        @trgtActionExtraArgs: args to unpack & pass to @trgtAction after items
 
         When tkinter root closed, Returns SelectedList of items
     """
-    global nextPage, RootTk,SelectedList
-
-
+    global nextPage,SelectedList
+    
+    rootTk=tk.Tk()
     if groupsStart == None: 
         groupsStart=GetGroups(grouppingRule=grouppingRule,startSearch=startSearch\
-            ,filterTumbNailPresent=True)
-        groupsStart=FilterGroups(groupsStart,5,mode="len")  #filter away little groups
-    RootTk = tk.Tk()
-    ScrolledFrameGroup = VerticalScrolledFrame(RootTk)
+            ,filterTumbnail=(not drawGif),filterGif=drawGif)
+        groupsStart=FilterGroups(groupsStart,100,mode="dur") #filter small groups
+        if len(groupsStart)==0:
+            print("no groups left, nothing to show",file=stderr)
+            exit(1)
+
+    ScrolledFrameGroup = VerticalScrolledFrame(rootTk)
     ScrolledFrameGroup.grid()
 
     groupItems = list(groupsStart.items())
-    if sortOnGroupLen:
-        groupItems.sort(key=lambda i: len(i[1]), reverse=True)
-    else:               #sort on groupKey
-        groupItems.sort(key=lambda i: i[0], reverse=True)
+    if sortOnGroupLen:  groupItems.sort(key=lambda i: len(i[1]), reverse=True)
+    else:               groupItems.sort(key=lambda i: i[0], reverse=True)#groupK
 
     for k, items in groupItems:
+        #bind group select action
+        gotoGroup = partial(trgtAction, items,*trgtActionExtraArgs) 
+
         cumulativeSize, cumulativeDur = 0, 0
         for item in items:
             cumulativeDur += int(item.duration)
             cumulativeSize += int(item.sizeB)
-        #for each group key, display the core part
+        #for each group key, display just a part if long key
         k=str(k)
-        keyStr = k+ prefix
+        keyStr = k+" "
         if len(keyStr) > THRESHOLD_KEY_PRINT:
             keyStr = keyStr[:THRESHOLD_KEY_PRINT] + "... "
             widthIdx=k.lower().find("width") #if found show from resolution width
-            if widthIdx >= 0: keyStr=k[widthIdx:widthIdx+THRESHOLD_KEY_PRINT]+"... "
+            if widthIdx >= 0: keyStr=k[widthIdx:widthIdx+THRESHOLD_KEY_PRINT]+"...."
 
+        #selection button with related group info as label text
         groupBtnTxt = "groupK: " + keyStr + "\nnumElements: " + str(len(items))\
          + " size: "+str(cumulativeSize/2**20)+"MB dur: "+str(cumulativeDur/60)
-        gotoGroup = partial(trgtAction, items)
         tk.Button(ScrolledFrameGroup, text=groupBtnTxt,command=gotoGroup).pack()#TODO GRID?
 
-    RootTk.mainloop()
+    rootTk.mainloop()
     return SelectedList
 
 if __name__ == "__main__": 
 
     SELECTION_LOGFILE="/tmp/selection"
+    SEL_MODE="ITEMS" #"GROUPS"
     grouppingFunc=ffmpegConcatFilterGroupping #ffmpegConcatDemuxerGroupping
-    #guiMinimalStartGroupsMode(grouppingRule=grouppingFunc)
-    itemsGridViewStart(list(GetItems(".").values()))
+
+    if SEL_MODE=="GROUPS":
+        guiMinimalStartGroupsMode(grouppingRule=grouppingFunc,drawGif=True,\
+            trgtActionExtraArgs=[True,True])
+    else:   itemsGridViewStart(list(GetItems(".").values()),drawGif=True)
+

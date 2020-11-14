@@ -86,10 +86,13 @@ def parseTimeOffset(timeStr, convertToSec=False):
 
 
 ### worker pool functions
-def _poolMapFunc(args):  # stub to call a function with 1 arg, eventually printing an error strings
+def _stabMapFunc(args):  
+    # stub to call a function with @args, unpacked if list
+    
     item, function, errStr = args
     try:
-        out = function(item)
+        if type(args)==type([]):    out = function(*item)
+        else:                       out = function(item)
     except Exception as e:
         print(errStr + " " + item, e)
         out = None
@@ -98,7 +101,7 @@ def concurrentPoolProcess(workQueue, function, errStr, poolSize, poolStart=None)
     """
     concurrently with a worker pool apply function to workQueue, using an errStr if error occurr
     @param workQueue: args list where to apply function concurrently
-    @param function:  function with 1 pos arg to apply concurrently
+    @param function:  func args(if list unpacked in _stabMapFunc) -> out to apply concurrently
     @param errStr:    err str to print if some exception ryse during the functions evaluation
     @param poolStart: previusly created worker pool to reuse
     @return: iterable of either [(function(target)] or None if error occurred
@@ -107,14 +110,23 @@ def concurrentPoolProcess(workQueue, function, errStr, poolSize, poolStart=None)
     if poolStart == None:    pool = Pool(poolSize)
     mapArgs = list()
     for item in workQueue: mapArgs.append((item, function, errStr))
-    out = pool.map(_poolMapFunc, mapArgs)  # TODO PARTITIONIING MANUAL?
-    if poolStart == None:
+    out = pool.map(_stabMapFunc, mapArgs)  # TODO PARTITIONIING MANUAL?
+    if poolStart == None:   #also close if not reused previous pooNoneNoneNoneNoneNonel
         pool.close()
         pool.terminate
         pool.join()
     return out
 ######
 printList = lambda l: list(map(print, l))  # basic print list, return [None,...]
+
+def truncString(longStr,prefixToShow=9,suffixPatternToShowSep="/"):
+    if longStr==None:                  return ""
+    elif len(longStr)<=2*prefixToShow: return longStr
+    
+    endPattern=longStr[:-prefixToShow]
+    if longStr.find(suffixPatternToShowSep) != -1:
+        endPattern=longStr.split(suffixPatternToShowSep)[-1]
+    return longStr[:prefixToShow]+"...."+endPattern
 
 TurtleImported=False
 def drawSegmentsTurtle(itemSegmentList, SCREEN_W=400, LINE_WIDTH_SEG=3, SEGS_FNAME=None):

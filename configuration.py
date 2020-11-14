@@ -7,7 +7,7 @@ TMP_SEL_FILE="/tmp/selection.tmp.list.json"
 # vid files handled extensions
 GIF_TUMBRL_EXTENSION = "gif"
 IMG_TUMBRL_EXTENSION = "jpg"
-VIDEO_MULTIMEDIA_EXTENSION = ["mp4", "wmw"]
+VIDEO_MULTIMEDIA_EXTENSION = ["mp4", "wmw"] #TODO NameIdFirstDot ?
 METADATA_EXTENSION = "json"
 ##items scan
 SAVE_GENERATED_METADATA=True #save newly generated vids metadata
@@ -22,19 +22,34 @@ MIN_GROUP_DUR=196
 if "MIN_GROUP_DUR" in env: MIN_GROUP_DUR= int(env["MIN_GROUP_DUR"])
 MIN_GROUP_LEN=6
 if "MIN_GROUP_LEN" in env: MIN_GROUP_LEN= int(env["MIN_GROUP_LEN"])
-#AUDIT
-QUIET_VID_LOG=True
-VERBOSE=False
-DEBUG=True
 
-#GUI CONFIGURATION
+##AUDIT
+AUDIT_VIDINFO=True #__str__ , 
+if "AUDIT_VIDINFO" in env and "F" in env["AUDIT_VIDINFO"].upper(): AUDIT_VIDINFO=False
+AUDIT_DSCPRINT=False      #various print
+if "AUDIT_DSCPRINT" in env and "T" in env["AUDIT_DSCPRINT"].upper(): AUDIT_DSCPRINT=True
+AUDIT_MISSERR=True
+if "AUDIT_MISSERR" in env and "F" in env["AUDIT_MISSERR"].upper():AUDIT_MISSERR=False
+QUIET=False
+if "QUIET" in env and "T" in env["QUIET"].upper(): #disable audits
+    QUIET,AUDIT_DSCPRINT,AUDIT_MISSERR,AUDIT_VIDINFO=True,False,False,False
+    DEBUG=False
+
+DEBUG=False
+if "DEBUG" in env and "T" in env["DEBUG"].upper(): DEBUG=True
+
+##GUI CONFIGURATION
 DISABLE_GUI = False
 if "DISABLE_GUI" in env and "T" in env["DISABLE_GUI"].upper(): DISABLE_GUI = True
 BTN_SELECTED_THICKNESS=7
 BTN_NN_SELECTED_THICKNESS=1
 GUI_COLSIZE=3
-ITEMS_LIMIT = 250   #tkinter's own limit on how mutch obj to display ...
+GUI_ITEMS_LIMIT = 250   #tkinter's own limit on how mutch obj to display ...
 THRESHOLD_KEY_PRINT=250  #max chars to show in a button
+font = ("Arial", 15, "bold") #btn text font
+#gif
+MAX_FRAME_N=20
+
 
 NameIdFirstDot = True  # IF TRUE the nameID will be extracted from a path name up to the first founded dot
 if env.get("NameIdFirstDot") != None and "F" in env["NameIdFirstDot"].upper(): NameIdFirstDot = False
