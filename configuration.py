@@ -43,9 +43,11 @@ DISABLE_GUI = False
 if "DISABLE_GUI" in env and "T" in env["DISABLE_GUI"].upper(): DISABLE_GUI = True
 BTN_SELECTED_THICKNESS=7
 BTN_NN_SELECTED_THICKNESS=1
-GUI_COLSIZE=3
+GUI_COLSIZE=6
 GUI_ITEMS_LIMIT = 250   #tkinter's own limit on how mutch obj to display ...
 THRESHOLD_KEY_PRINT=250  #max chars to show in a button
+#ITEMS'GRIDDED FRAME
+BAR_W=8
 font = ("Arial", 15, "bold") #btn text font
 #gif
 MAX_FRAME_N=20

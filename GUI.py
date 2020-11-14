@@ -17,7 +17,7 @@
 from MultimediaManagementSys import *
 from grouppingFunctions import sizeBatching
 from utils import printList
-from configuration import MAX_FRAME_N
+from configuration import MAX_FRAME_N,BAR_W
 
 import tkinter as tk
 from tkinter import messagebox
@@ -26,7 +26,7 @@ from functools import partial
 from os import environ as env
 from copy import copy
 from time import perf_counter,ctime
-from sys import stderr
+from sys import stderr,argv
 from collections import namedtuple
 
 SelectedList = list()       #selection modified by GUI 
@@ -157,7 +157,9 @@ def _flushSelectedItems(selected=SelectedList):
     printList(lines)
 
 class VerticalScrolledFrame(tk.Frame):
-    """ Tkinter vertical scrollable frame 
+    """ 
+        Tkinter vertical scrollable frame 
+        Implemented with canvas + scrollB -> 
         interior field to place widgets inside the scrollable frame
         Construct and pack/place/grid normally
     """
@@ -166,7 +168,7 @@ class VerticalScrolledFrame(tk.Frame):
         tk.Frame.__init__(self, parent, *args, **kw)
 
         # create a canvas object and a vertical scrollbar for scrolling it
-        vscrollbar = tk.Scrollbar(self, orient=tk.VERTICAL,width=53,activebackground="green",bg="green")
+        vscrollbar = tk.Scrollbar(self, orient=tk.VERTICAL,width=BAR_W,activebackground="green",bg="green")
         vscrollbar.pack(fill=tk.Y, side=tk.LEFT, expand=tk.FALSE)
         canvas = tk.Canvas(self, bd=0, highlightthickness=0, height=999, yscrollcommand=vscrollbar.set)
         # canvas.configure(scrollregion=canvas.bbox("all"))
@@ -186,8 +188,9 @@ class VerticalScrolledFrame(tk.Frame):
         # also updating the scrollbar
         def _configure_interior(event):
             # update the scrollbars to match the size of the inner frame
+            ##frame filled W - H
             size = (interior.winfo_reqwidth(), interior.winfo_reqheight())
-            canvas.config(scrollregion="0 0 %s %s" % size)
+            canvas.config(scrollregion="0 0 %s %s" % size)  #TODO DEBUG -> HERE ALL ITEMS OF THE PAGE ?
             if interior.winfo_reqwidth() != canvas.winfo_width():
                 # update the canvas's width to fit the inner frame
                 canvas.config(width=interior.winfo_reqwidth())
@@ -256,7 +259,7 @@ def _nextPage(items,drawGif,sFrame):
 
     pgN += 1
     print("nextpgNumber :", pgN)
-    nextPage.configure(text="nextPage: "+str(pgN))
+    #nextPage.configure(text="nextPage: "+str(pgN))
 
 
 def drawItems(items,drawGif,mainFrame):
@@ -455,12 +458,16 @@ def guiMinimalStartGroupsMode(groupsStart=None,grouppingRule=sizeBatching,\
 
 if __name__ == "__main__": 
 
-    SELECTION_LOGFILE="/tmp/selection"
+    startSearch="."
+    if argv[1]=="-h": print("usage: [start,selectionMode] ")
+    if len(argv)>1: startSearch=argv[1]
     SEL_MODE="ITEMS" #"GROUPS"
-    grouppingFunc=ffmpegConcatFilterGroupping #ffmpegConcatDemuxerGroupping
+    if len(argv)>2: SEL_MODE=argv[2]
 
+    SELECTION_LOGFILE="/tmp/selection"
+    grouppingFunc=ffmpegConcatFilterGroupping #ffmpegConcatDemuxerGroupping
     if SEL_MODE=="GROUPS":
-        guiMinimalStartGroupsMode(grouppingRule=grouppingFunc,drawGif=True,\
+        guiMinimalStartGroupsMode(startSearch,grouppingRule=grouppingFunc,drawGif=True,\
             trgtActionExtraArgs=[True,True])
     else:   itemsGridViewStart(list(GetItems(".").values()),drawGif=True)
 

@@ -23,7 +23,8 @@ def ffprobeMetadataGen(vidPath, FFprobeJsonCmd="ffprobe -v quiet -print_format j
     FFprobeJsonCmdSplitted = FFprobeJsonCmd.split(" ") + [vidPath]
     out = run(FFprobeJsonCmdSplitted, capture_output=True)
     metadataFull = loads(out.stdout.decode())
-    if metadataFull.get("error")!=None and ["error"]!=None and len(metadataFull)==1: print("error at ",vidPath,file=stderr);return None,None,None,None
+    if metadataFull.get("error")!=None and ["error"]!=None and len(metadataFull)==1: 
+        print("error at ",vidPath,file=stderr);return None,None,None,None
     return (*extractMetadataFFprobeJson(metadataFull),metadataFull)     #python3 required
 
 
@@ -199,7 +200,7 @@ def vidItemsSorter(itemsSrc, sortMethod):
 
 
 def cleanPathname(name, disableExtensionForce=False, extensionTarget=".mp4"):
-    #clean pathName assuring it will be like 'XXXXX.extensionTarget'
+    #clean pathName return it like 'XXXXX.extensionTarget'
     if len(name)<3: return
     if name[0]!="'": name="'"+name
     if name[-1]!="'": name=name+"'"
