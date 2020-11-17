@@ -1,8 +1,12 @@
 from os import environ as env
 
 
-TMP_SEL_FILE="/tmp/selection.tmp.list.json"
-######
+### DUMP
+DUMP_ITEMS_FOUNDED=True                 #export
+USE_DUMP_ITEMS_FOUNDED = True
+GROUPS_LAST_FOUND="/tmp/lastGroups.json"
+ITEMS_LAST_FOUND="/tmp/lastItems.json"
+
 ### INTERNAL CONFIGURATION PARAMS
 # vid files handled extensions
 GIF_TUMBRL_EXTENSION = "gif"
@@ -15,7 +19,7 @@ if env.get("SAVE_GENERATED_METADATA") != None and "F" in env.get("SAVE_GENERATED
 # pool workers
 POOL_TRESHOLD = 100
 if "POOL_TRESHOLD" in env: POOL_TRESHOLD = int(env["POOL_TRESHOLD"])
-POOL_SIZE = 4
+POOL_SIZE = 8
 if "POOL_SIZE" in env: POOL_SIZE = int(env["POOL_SIZE"])
 # var
 MIN_GROUP_DUR=196
@@ -31,7 +35,7 @@ if "AUDIT_DSCPRINT" in env and "T" in env["AUDIT_DSCPRINT"].upper(): AUDIT_DSCPR
 AUDIT_MISSERR=True
 if "AUDIT_MISSERR" in env and "F" in env["AUDIT_MISSERR"].upper():AUDIT_MISSERR=False
 QUIET=False
-if "QUIET" in env and "T" in env["QUIET"].upper(): #disable audits
+if QUIET or "QUIET" in env and "F" in env["QUIET"].upper(): #disable audits
     QUIET,AUDIT_DSCPRINT,AUDIT_MISSERR,AUDIT_VIDINFO=True,False,False,False
     DEBUG=False
 
@@ -40,23 +44,26 @@ if "DEBUG" in env and "T" in env["DEBUG"].upper(): DEBUG=True
 
 ##GUI CONFIGURATION
 DISABLE_GUI = False
+TMP_SEL_FILE="/tmp/selection.tmp.list.json"
 if "DISABLE_GUI" in env and "T" in env["DISABLE_GUI"].upper(): DISABLE_GUI = True
 BTN_SELECTED_THICKNESS=7
 BTN_NN_SELECTED_THICKNESS=1
-GUI_COLSIZE=6
+GUI_COLSIZE=5
+if "GUI_COLSIZE" in env: GUI_COLSIZE=int(env["GUI_COLSIZE"])
 GUI_ITEMS_LIMIT = 250   #tkinter's own limit on how mutch obj to display ...
 THRESHOLD_KEY_PRINT=250  #max chars to show in a button
 #ITEMS'GRIDDED FRAME
-BAR_W=8
+CANV_W,CANV_H=1900,1000
+BAR_W=18
 font = ("Arial", 15, "bold") #btn text font
 #gif
 MAX_FRAME_N=20
-
-
-NameIdFirstDot = True  # IF TRUE the nameID will be extracted from a path name up to the first founded dot
+GIF_UPDATE_POLL=196
+DRAW_GIF=True   #if False, display just the tumbnails jpg if any
+NameIdFirstDot = True# IF TRUE the nameID will be extracted from a path name up to the first founded dot
 if env.get("NameIdFirstDot") != None and "F" in env["NameIdFirstDot"].upper(): NameIdFirstDot = False
 #export comma separated list of keyword to filter away items after a scan
-FilterKW=[]
+FilterKW=["frame","out","fake","group_","?","clips"]
 if env.get("FilterKW") != None: FilterKW=env["FilterKW"].split(",") 
 FORCE_METADATA_GEN = True  # force the generation of metadata of each founeded vid without a matching metadata file
 if env.get("FORCE_METADATA_GEN") != None and "F" in env[

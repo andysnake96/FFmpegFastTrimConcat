@@ -103,20 +103,6 @@ class Vid:
         #out = Popen(cmd.split(), stderr=DEVNULL, stdout=DEVNULL)
         out = system(cmd+" 1>/dev/null 2>/dev/null &\n")
 
-    def remove(self,confirm=True):
-        #remove this item, if confirm ask confirmation onthe backed terminal
-        #return True if item actually removed
-        cmd = "rm "
-        if self.pathName!=None: cmd+=" "+ self.pathName
-        if self.imgPath!=None: cmd+=" " + self.imgPath
-        if self.metadataPath!=None: cmd+=" " + self.metadataPath
-        print(cmd)
-        if confirm and "Y" in input(cmd+" ???(y||n)\t").upper():
-            # out = Popen(cmd.split(), stderr=DEVNULL, stdout=DEVNULL).wait()
-            out = run(cmd.split())
-            print("rm returned:",out.returncode)
-            return out.returncode==0
-        return False
 
     def fromJson(self, serializedDict, deserializeDictJson=False):
         """
@@ -137,10 +123,23 @@ class Vid:
         dump(metadata, dstFp)
         dstFp.close()
     
-    def toTupleList():
+    def toTupleList(self):
         return VidTuple(self.nameID,self.pathName,self.sizeB,self.gifPath,self.imgPath,\
          self.metadataPath,self.metadata,self.duration,self.extension,self.cutPoints)
 
+def remove(vid, confirm=True):
+    #remove this item, if confirm ask confirmation onthe backed terminal
+    #return True if item actually removed
+    cmd = "rm "
+    if vid.pathName!=None: cmd+= " " + vid.pathName
+    if vid.imgPath!=None: cmd+= " " + vid.imgPath
+    if vid.metadataPath!=None: cmd+= " " + vid.metadataPath
+    if confirm and "Y" in input(cmd+" ???(y||n)\t").upper():
+        # out = Popen(cmd.split(), stderr=DEVNULL, stdout=DEVNULL).wait()
+        out = run(cmd.split())
+        print("rm returned:",out.returncode)
+        return out.returncode==0
+    return False
 
 ### (de) serialization of Vids list
 def SerializeSelectionSegments(selectedItems, filename=None):
@@ -186,7 +185,7 @@ def extractExtension(filename, PATH_ID,nameIdFirstDot=NameIdFirstDot):
     if extIndx != -1:
         if nameIdFirstDot:  extIndx = fname.find(".")  # first dot
         nameID, extension = fname[:extIndx], fname[extIndx + 1:]
-    if PATH_ID: nameID=fpath[:fnameIdx]+nameID 
+    if PATH_ID: nameID=fpath[:fnameIdx]+nameID
     return extension, nameID
 
 
@@ -201,8 +200,32 @@ def skipFname(extension):
         if not skip or ext in extension:    return False
     return skip
 
+def genMetadata(vidItems):
+    """ @param vidItems either dict nameId->Vid object or just list of vid object
+        inplace add metadata
+    """
+    itemsList=vidItems
+    if type(vidItems)==type(dict()): itemsList=vidItems.values()
 
-def GetItems(rootPath=".", vidItems=dict(), PATH_ID=False,forceMetadataGen=FORCE_METADATA_GEN, limit=float("inf"), followlinks=True):
+    metadataFilesQueue = [i for i in itemsList if i.metadata == None and i.pathName != None]
+    metadataFilesPathQueue = [i.pathName for i in metadataFilesQueue]  # src vid files path to generate metadata
+    print("metadata to gen queue len:", len(metadataFilesPathQueue))
+    if len(metadataFilesQueue) > POOL_TRESHOLD:  # concurrent version
+        processed = list(
+            concurrentPoolProcess(metadataFilesPathQueue, ffprobeMetadataGen, "metadata build err", POOL_SIZE))
+        # manually set processed metadata fields (pool.map work on different copies of objs)
+        for i in range(len(metadataFilesPathQueue)):
+            item, processedMetadata = metadataFilesQueue[i], processed[i]
+            if processedMetadata != None and processedMetadata[1] != None:  # avaible at least metadata dict
+                item.sizeB, item.metadata, item.duration, metadataFull = processedMetadata
+                if SAVE_GENERATED_METADATA: item.saveFullMetadata(metadataFull)
+            else:
+                print("invalid metadata gen at ", item.pathName, file=stderr)
+    else:  # sequential version if num of jobs is too little -> only pickle/spawn/... overhead in pool
+        for item in metadataFilesQueue: item.genMetadata();
+
+def GetItems(rootPath=".", vidItems=dict(), PATH_ID=False,forceMetadataGen=FORCE_METADATA_GEN, limit=float("inf"), \
+             followlinks=True,skipKw=FilterKW):
     """
     scan for vid objs from rootPathStr recursivelly
     will be builded a Vid objfor each founded group of files with the same nameID if the extension is in a defined set (see skipFname)
@@ -216,6 +239,7 @@ def GetItems(rootPath=".", vidItems=dict(), PATH_ID=False,forceMetadataGen=FORCE
     @param forceMetadataGen:force the generation of metadata of each Vidobj without metadata's fields
     @param limit:           up bound of Vid items to found (dflt inf)
     @param followlinks:     follow sym links during file search (dflt True)
+    @param skipKw:          list of keyword that if any of them is in a filepath -> skip item
     @return: updated @vidItems dict with the newly founded vids
     """
     start = perf_counter()
@@ -223,9 +247,12 @@ def GetItems(rootPath=".", vidItems=dict(), PATH_ID=False,forceMetadataGen=FORCE
     for root, directories, filenames in walk(rootPath, followlinks=followlinks):
         for filename in filenames:
             fpath = path.join(path.abspath(root), filename)
+            skip=False
+            for kw in skipKw:
+                if kw in fpath: skip=True
             # extract nameKey and extension from filename, skip it if skipFname gives true
             extension, nameKey = extractExtension(fpath,PATH_ID)
-            if skipFname(extension):                          continue
+            if skip or skipFname(extension):                     continue
             # update vidItems dict with the new vid file founded
             item = vidItems.get(nameKey)
             if item == None:
@@ -254,6 +281,7 @@ def GetItems(rootPath=".", vidItems=dict(), PATH_ID=False,forceMetadataGen=FORCE
     metadataFilesQueue = [i for i in vidItems.values() if i.metadataPath != None and i.pathName!=None]
     print("double nameID founded: ",doubleCounter,"tot num of items founded:",len(vidItems))
     print("metadata file to read queue len:",len(metadataFilesQueue))
+    startRdMetadata=perf_counter()
     if len(metadataFilesQueue) > POOL_TRESHOLD:
         # concurrent metadata files parse in order
         metadataFilesPathQueue = [i.metadataPath for i in metadataFilesQueue]
@@ -261,30 +289,18 @@ def GetItems(rootPath=".", vidItems=dict(), PATH_ID=False,forceMetadataGen=FORCE
         for i in range(len(metadataFilesQueue)):
             metadata, item = processed[i], metadataFilesQueue[i]
             if metadata == None or metadata[1]==None:
-                print("None metadata at ",item.metadataPath,file=stderr);continue
+                print("None metadata readed at ",item.metadataPath,file=stderr);continue
             item.sizeB, item.metadata, item.duration = metadata
     else:  # sequential version if num of jobs is too little -> only pickle/spawn/... overhead in pool
         for item in metadataFilesQueue:
             item.sizeB, item.metadata, item.duration = parseMultimedialStreamsMetadata(item.metadataPath)
-
-    if forceMetadataGen:  # generate missing metadata with run() calls -> ffprobe + parse
-        metadataFilesQueue=         [ i for i in vidItems.values()  if i.metadata == None and i.pathName!= None  ]
-        metadataFilesPathQueue =    [i.pathName for i in metadataFilesQueue]  # src vid files path to generate metadata
-        print("metadata to gen queue len:", len(metadataFilesPathQueue))
-        if len(metadataFilesQueue) > POOL_TRESHOLD:  # concurrent version
-            processed = list(concurrentPoolProcess(metadataFilesPathQueue, ffprobeMetadataGen, "metadata build err",POOL_SIZE))
-            # manually set processed metadata fields (pool.map work on different copies of objs)
-            for i in range(len(metadataFilesPathQueue)):
-                item, processedMetadata = metadataFilesQueue[i], processed[i]
-                if processedMetadata != None and processedMetadata[1]!=None:    #avaible at least metadata dict
-                    item.sizeB, item.metadata, item.duration,metadataFull = processedMetadata
-                    if SAVE_GENERATED_METADATA: item.saveFullMetadata(metadataFull)
-                else: print("invalid metadata gen at ",item.pathName,file=stderr)
-        else:  # sequential version if num of jobs is too little -> only pickle/spawn/... overhead in pool
-            for item in metadataFilesQueue: item.genMetadata();
+    endRdMetadata=perf_counter()
+    startGenMetadata=perf_counter()
+    if forceMetadataGen:        genMetadata(vidItems) # generate missing metadata with run() calls -> ffprobe + parse
     end = perf_counter()
-    print("founded Vids: ", len(vidItems), "in secs: ", end - start)
+    print("founded Vids: ", len(vidItems),"metadataRead:",endRdMetadata-startRdMetadata,"metaGen:",end-startGenMetadata)
     return vidItems
+
 
 def ConvertItemsTuplelist(items):
     #convert Vid items to Tuplelist
@@ -335,7 +351,7 @@ def FilterGroups(groups, minSize, mode="len"):
         if mode=="both":    keepGroup=keepGroupDur and keepGroupLen
 
         if keepGroup:        filteredGroup[groupK]=items
-        elif AUDIT_MISSERR:  print("filtered group\tlen:",len(items),"dur:",gDur,file=stderr)
+        elif AUDIT_DSCPRINT:  print("filtered group\tlen:",len(items),"dur:",gDur,file=stderr)
     return filteredGroup
 
 def selectGroupTextMode(groups,joinGroupItems=True):
@@ -394,13 +410,15 @@ def FilterItems(items, pathPresent=True,tumbnailPresent=False,gifPresent=False,\
         for kw in filterKW:
             if not keep or kw in i.pathName:
                 keep=False
+                print("filtered keyword",kw," at ",i.pathName)
                 break
         if keep:    outList.append(i)
 
-        if AUDIT_MISSERR or not keep:
-            if i.pathName == None:print("missing pathName at",i);continue
-            if i.imgPath == None: print("Missing thumbnail at \t", i.pathName,file=stderr)
-            if i.gifPath == None: print("Missing gif at \t", i.pathName,file=stderr)
+        if AUDIT_MISSERR or (not QUIET and not keep):
+            if i.pathName == None:print("missing pathName at",i,file=stderr);continue
+            if i.imgPath == None and i.gifPath == None: #if at least one of them is fine
+                if i.imgPath == None : print("Missing thumbnail at \t", i.pathName,file=stderr)
+                if i.gifPath == None:  print("Missing gif at \t", i.pathName,file=stderr)
             if i.metadata==None:  print("None metadata", i.metadataPath, file=stderr)
             elif i.duration <= 0 and i.metadataPath != None:
                 print("invalid duration", i.duration, i.metadataPath, file=stderr)
@@ -454,7 +472,7 @@ def TrimSegmentsIterative(itemsList, skipNameList=None, dfltStartPoint=None, dfl
             skipList.append(item)
             continue
         if "Q" in cmd.upper(): return selection, skipList
-        if "DEL" in cmd.upper(): item.remove(); continue
+        if "DEL" in cmd.upper(): remove(item); continue
         fields = cmd.split()
         segmentationPoints = list()  # new segmentation points for the vid
         tmpSelectionBackup=open(TMP_SEL_FILE,"w")

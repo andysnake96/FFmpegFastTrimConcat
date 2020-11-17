@@ -14,6 +14,9 @@
 #You should have received a copy of the GNU General Public License
 #along with FFmpegFastTrimConcat.  If not, see <http://www.gnu.org/licenses/>.
 #
+from builtins import tuple
+from turtledemo.forest import start
+
 from MultimediaManagementSys import *
 from grouppingFunctions import sizeBatching
 from utils import printList
@@ -40,13 +43,6 @@ RootTk=None
 pgN =0  #page (subset) of items to grid
 stopGifsUpdate=False #set to true when to stop the gifs update
 
-#global flags touched by the user
-#PlayMode= tk.BooleanVar()
-#RemoveModeEnable=tk.BooleanVar()
-#DeleteGroupKeepOne=tk.BooleanVar()
-#SegSelectionMode = tk.IntVar()
-#SegSelectionTimes = tk.Entry(root)
-
 ###button logics
 def _removeSelected(remTarget=SelectedList):
     global SelectedList,btns
@@ -54,7 +50,7 @@ def _removeSelected(remTarget=SelectedList):
         return
     for i in remTarget:
         btn=btns[i.nameID]
-        if not i.remove(): continue #not removed
+        if not remove(i): continue #not removed
         btnOff(btn)
         btn.config(state="disabled")
         del(i,btn,btns[i.nameID])
@@ -91,7 +87,7 @@ def _select(selected):
         if messagebox.askyesno('REMOVE'+str(len(remTarget)), 'Remove?',icon='warning'):
             for t in remTarget:
                 button=btns[t.nameID]
-                if not t.remove(): continue #not removed
+                if not remove(t): continue #not removed
                 btnOff(button) #hide deletted item's btn
                 button.config(state="disabled")
             del(button,btns[t.nameID],t)
@@ -101,8 +97,9 @@ def _select(selected):
 
     if SegSelectionMode.get() == 1:  #add cut points to the selected item
         times = [float(x) for x in SegSelectionTimes.get().strip().split(" ") ] #ITERATIVE_TRIM_SEL CALL LOGIC
-        selected.cutPoints.extend([times])
+        selected.cutPoints.extend([times]) #TODO EXTRACT/ENHANCE MMSYS ITERATIVE CUT AND PARSE HERE Entry's string
         SelectedList.append(selected)
+        button.flash()
         return
 
     if selected in SelectedList and len(selected.cutPoints)==0:#already selected in normalmode
@@ -119,10 +116,11 @@ def _select(selected):
 
 def buildFFmpegCuts(item,seekOutputOpt=False):
     outStr=""
+    encode_out="-c:v copy -avoid_negative_ts make_zero -n out.mp4"
     for points in item.cutPoints:
-        cutCmd= "ffmpeg "+" -ss "+str(points[0])+" -to "+str(points[1])+" -i "+item.pathName+" out.mp4\n"
+        cutCmd= "ffmpeg "+" -ss "+str(points[0])+" -to "+str(points[1])+" -i "+item.pathName+encode_out
         if seekOutputOpt:
-            cutCmd= "ffmpeg -i "+item.pathName+ "-ss "+str(points[0])+" -to "+str(points[1])+" out.mp4\n"
+            cutCmd= "ffmpeg -i "+item.pathName+ "-ss "+str(points[0])+" -to "+str(points[1])+encode_out
         outStr+=cutCmd
     return outStr
 
@@ -149,8 +147,10 @@ def _flushSelectedItems(selected=SelectedList):
         f.close()
     #clear selection
     for i in SelectedList:
-        button=btns[i.nameID]
-        btnOff(button) #hide deletted item's btn
+        try:    #old page's button have been already destroied
+            button=btns[i.nameID]
+            btnOff(button) #hide deletted item's btn
+        except:pass
     SelectedList.clear()
 
     print(selectionInfos)
@@ -159,7 +159,7 @@ def _flushSelectedItems(selected=SelectedList):
 class VerticalScrolledFrame(tk.Frame):
     """ 
         Tkinter vertical scrollable frame 
-        Implemented with canvas + scrollB -> 
+        Implemented with scrollB + (canvas->frame_interior) ->..widgects
         interior field to place widgets inside the scrollable frame
         Construct and pack/place/grid normally
     """
@@ -170,9 +170,9 @@ class VerticalScrolledFrame(tk.Frame):
         # create a canvas object and a vertical scrollbar for scrolling it
         vscrollbar = tk.Scrollbar(self, orient=tk.VERTICAL,width=BAR_W,activebackground="green",bg="green")
         vscrollbar.pack(fill=tk.Y, side=tk.LEFT, expand=tk.FALSE)
-        canvas = tk.Canvas(self, bd=0, highlightthickness=0, height=999, yscrollcommand=vscrollbar.set)
+        canvas = tk.Canvas(self, bd=0, highlightthickness=0, width=CANV_W,height=CANV_H, yscrollcommand=vscrollbar.set)
         # canvas.configure(scrollregion=canvas.bbox("all"))
-        canvas.pack(side=tk.RIGHT, fill=tk.BOTH, expand=tk.TRUE)
+        canvas.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
         vscrollbar.config(command=canvas.yview)
         vscrollbar.bind("<MouseWheel>", canvas.yview)
         # reset the view
@@ -182,6 +182,8 @@ class VerticalScrolledFrame(tk.Frame):
         canvas.bind("<MouseWheel>", canvas.yview)
         # create a frame inside the canvas which will be scrolled with it
         self.interior = interior = tk.Frame(canvas)
+        self.root=parent
+        self.childs=list()  #object gridded inside the scrollable frame
         interior_id = canvas.create_window(0, 0, window=interior, anchor=tk.NW)
 
         # track changes to the canvas and frame width and sync them,
@@ -208,12 +210,15 @@ PreviewTuple=namedtuple("PreviewTuple","showObj tumbnail gif")
 
 ####gif refresh functions
 def getFrames(gifPath,max_frame_n=MAX_FRAME_N):
-    gif=Image.open(gifPath)
-    frames=list()
-    for x in range(max_frame_n): 
-        frames.append(ImageTk.PhotoImage(gif.copy().convert("RGBA")))
-        try:             gif.seek(x+1)
-        except EOFError: break        #reached EOF file
+    frames = list()
+    try:
+        gif=Image.open(gifPath)
+        for x in range(max_frame_n):
+            frames.append(ImageTk.PhotoImage(gif.copy().convert("RGBA")))
+            gif.seek(x+1)
+    except EOFError: pass #reached EOF file
+    except Exception as e:
+           print("getFrames",e,file=stderr)
     return frames
     
 
@@ -229,7 +234,7 @@ def update(gifs,root):
         g.showObj[0].configure(image=frame)
         
         if DEBUG:   print("showObj id:",id(g.showObj[0]))
-    root.after(96, update,gifs,root)
+    root.after(GIF_UPDATE_POLL, update,gifs,root)
 
 GifMetadTuple=namedtuple("GifMetadata","frames frameIdxRef showObj ")
 
@@ -241,6 +246,7 @@ def _getPreview(path,refObj,getGif=False):
     
     if getGif!=None:
         gif=GifMetadTuple(getFrames(path),[0],[refObj])
+        if len(gif.frames) == 0:    return None
         return PreviewTuple(refObj,None,gif)
     
     try:                    
@@ -250,15 +256,28 @@ def _getPreview(path,refObj,getGif=False):
     return PreviewTuple(refObj,img,None)
 
 
-def _nextPage(items,drawGif,sFrame):
+def _nextPage(items,drawGif,root):
     #stub to draw a page of items with global var pgN 
-    global pgN
+    global pgN,sFrame
     if pgN*GUI_ITEMS_LIMIT > len(items): pgN = 0  # circular next page
+
+    #delete previous scroll frame
+    #(global because this stub is linked to a btn -> woud always pass the same ref)
+    try:
+        for c in sFrame.childs:
+            c.destroy; del c
+        sFrame.interior.destroy()
+        sFrame.destroy()
+        del sFrame
+    except: pass
+
+    sFrame=VerticalScrolledFrame(root)
+    sFrame.grid() #(row=1,column=0)
 
     drawItems(items[pgN*GUI_ITEMS_LIMIT:(pgN+1)*GUI_ITEMS_LIMIT],drawGif,sFrame)
 
     pgN += 1
-    print("nextpgNumber :", pgN)
+    print("nextpgNumber :", pgN,id(sFrame))
     #nextPage.configure(text="nextPage: "+str(pgN))
 
 
@@ -273,10 +292,13 @@ def drawItems(items,drawGif,mainFrame):
     global btns, imgs
     gifs,imgs = list(),list()
 
-    i,row, col,colSize=0,2,0,GUI_COLSIZE #aux indexes to progressivelly grid items
+    i,row, col,colSize=0,0,0,GUI_COLSIZE #aux indexes to progressivelly grid items
     
     start=perf_counter()
-    
+
+    try: del(btns)
+    except: pass
+
     btns={ it.nameID:tk.Button(mainFrame.interior) for it in items }
     prevArgs=list() #preview path,target tkinter show object
     if drawGif:
@@ -284,20 +306,24 @@ def drawItems(items,drawGif,mainFrame):
     else:   
         prevArgs=[ (items[i].imgPath,btns[items[i].nameID]) for i in range(len(items))]
 
-    if len(prevArgs)>POOL_TRESHOLD: #multi process image parsing
+    start=perf_counter()
+    if len(prevArgs)>POOL_TRESHOLD and not drawGif: #multi process image parsing
           print("worker pool concurrent image parsing")
           processed=list(concurrentPoolProcess(prevArgs,_getPreview,"badTumbNail",POOL_SIZE))
     else: processed=list(map(lambda args: _getPreview(*args),prevArgs))  #serial, unpack args
-    
+    end=perf_counter()
+    print("images parsing elapsed:",end-start)
+
     #fill buttons with preview parsed [concurrently]
     for p in range(len(processed)):
         prevTup=processed[p]
+        if prevTup==None:   continue
         item=items[p]
         btn=prevTup.showObj
         img,gif=prevTup.tumbnail,prevTup.gif
         funcTmp = partial(_select, item)   #BIND FUNCTION FOR SELECTION
 
-        txt = ""
+        txt = str(p)+": "
         if item.duration != 0: txt += "len secs\t" + str(item.duration)
         if item.sizeB != 0:    txt += "\nsize bytes\t" + str(item.sizeB)
         
@@ -313,6 +339,8 @@ def drawItems(items,drawGif,mainFrame):
             imgs.append(tumbrl) #avoid garbage collector to free the parsed imgs
 
         if DEBUG: print("Adding:",item.nameID,"showObj id:", id(btn), row, col, i)
+
+        mainFrame.childs.append(btn)
         btn.grid(row=row, column=col)
         col += 1;i += 1
         if col >= colSize:
@@ -325,7 +353,7 @@ def drawItems(items,drawGif,mainFrame):
     if drawGif :
         assert len(gifs)>0,"empty gif set -> nothing to show!"
         mainFrame.interior.after_idle(update,gifs,mainFrame)
-    # root.mainloop()
+
 
 
 
@@ -350,12 +378,14 @@ def itemsGridViewStart(itemsSrc,subWindow=False,drawGif=False,sort="size"):
     # root.resizable(True,True)
 
     items=None
-    if drawGif:     items=FilterItems(itemsSrc,gifPresent=True)
+    if drawGif:     items=FilterItems(itemsSrc,gifPresent=True,metadataPresent=False,durationPos=False) #TODO TEST WITH STUB VID -> NO METADATA GENNABLE
     else:           items=FilterItems(itemsSrc,tumbNailPresent=True)
-    
+
+    assert len(items)>0,"FILTERED ALL ITEMS"
     if DEBUG:       print("items to draw:");printList(items)
     #items=[i for i in itemsSrc if i!=None and i.pathName!=None and i.imgPath!=None]
-    vidItemsSorter(items,sort)        #sort with the target method
+    try: vidItemsSorter(items,sort)        #sort with the target method
+    except Exception as e: print("sorting items fail with: ",e)
     
     
     ##global flags for the user, used in _select, when an item is selected 
@@ -363,52 +393,46 @@ def itemsGridViewStart(itemsSrc,subWindow=False,drawGif=False,sort="size"):
     RemoveModeEnable=tk.BooleanVar()
     DeleteGroupKeepOne=tk.BooleanVar()
     SegSelectionMode = tk.IntVar()
-    SegSelectionTimes = tk.Entry(root)
-    
-    sFrame=VerticalScrolledFrame(root)
-    nextPg = partial(_nextPage,items,drawGif,sFrame)
-    nextPage = tk.Button(root, command=nextPg, text="nextPage", background="yellow")
+    buttonFrame = tk.Frame(root)
+    buttonFrame.grid(row=0,column=0)
+    nextPg = partial(_nextPage,items,drawGif,root)
+    nextPage = tk.Button(buttonFrame, command=nextPg, text="nextPage", background="yellow")
     nextPage.grid(row=0, column=0)
 
-    flushBtn = tk.Button(root, command=_flushSelectedItems,\
-        text="printSelectedMItems", background="green")
+    flushBtn = tk.Button(buttonFrame, command=_flushSelectedItems,\
+        text="printSelected", background="green")
     flushBtn.grid(row=0, column=1)  #flush items selected (print + file write)
 
-    segSelectionEnable = tk.Checkbutton(root, text="segSelectionEnable",\
+    segSelectionEnable = tk.Checkbutton(buttonFrame, text="segmentSelMode",\
         variable=SegSelectionMode) #TODO also flush->add: , command=_flushSelectedItems)
     segSelectionEnable.grid(row=1, column=0)
 
+    SegSelectionTimes = tk.Entry(buttonFrame)
     SegSelectionTimes.insert(0, "10 30")
     SegSelectionTimes.grid(row=1, column=1)
 
-    playModeEnable= tk.Checkbutton(root, text="play",variable=PlayMode,\
+    playModeEnable= tk.Checkbutton(buttonFrame, text="playMode",variable=PlayMode,\
         background="green")
     playModeEnable.grid(row=0, column=2)
 
     #remove items UI logic
-    remMode= tk.Checkbutton(root, text="remove mode",variable=RemoveModeEnable)
+    remMode= tk.Checkbutton(buttonFrame, text="removeMode",variable=RemoveModeEnable)
     remMode.grid(row=0,column=3)
-    delGroup= tk.Checkbutton(root, text="DelGroupKeepOne",variable=DeleteGroupKeepOne)
+    delGroup= tk.Checkbutton(buttonFrame, text="DelGroupKeepOne",variable=DeleteGroupKeepOne)
     delGroup.grid(row=0,column=4)
     remSel=partial(_removeSelected,SelectedList)
-    delSelection=tk.Button(root,command=remSel, text="DEL-SELECTION",background="red")
+    delSelection=tk.Button(buttonFrame,command=remSel, text="DEL_SELECTED",background="red")
     delSelection.grid(row=0, column=5)
 
-    sFrame.grid()
 
+    #root.after_idle(_nextPage,items,drawGif,sFrame)
     nextPg()
-    root.mainloop()
+    if not subWindow: root.mainloop()
 
     return SelectedList
 
-def guiMinimalStartGroupsMode(groupsStart=None,grouppingRule=sizeBatching,\
-        trgtAction=itemsGridViewStart,trgtActionExtraArgs=[],drawGif=False, \
-        startSearch=".",sortOnGroupLen=True):
-    """ @groupsStart: dict of k-->itemsGroup to show on selection,
-            if None, group items founded from @startSearch with @grouppingRule
-        @grouppingRule: if required, how to group items founded 
-            from @startSearch
-        @drawGif: if True, displayed gifs instead of tumbnails
+def guiMinimalStartGroupsMode(groups,trgtAction=itemsGridViewStart,trgtActionExtraArgs=[],startSearch=".",sortOnGroupLen=True):
+    """ @groups: dict of k-->itemsGroup to show on selection,
         @trgtAction: func to call on group select: items,[extraArgs] -> display
         @trgtActionExtraArgs: args to unpack & pass to @trgtAction after items
 
@@ -417,18 +441,12 @@ def guiMinimalStartGroupsMode(groupsStart=None,grouppingRule=sizeBatching,\
     global nextPage,SelectedList
     
     rootTk=tk.Tk()
-    if groupsStart == None: 
-        groupsStart=GetGroups(grouppingRule=grouppingRule,startSearch=startSearch\
-            ,filterTumbnail=(not drawGif),filterGif=drawGif)
-        groupsStart=FilterGroups(groupsStart,100,mode="dur") #filter small groups
-        if len(groupsStart)==0:
-            print("no groups left, nothing to show",file=stderr)
-            exit(1)
 
+    assert len(groups)>0,"empty groups given"
     ScrolledFrameGroup = VerticalScrolledFrame(rootTk)
     ScrolledFrameGroup.grid()
 
-    groupItems = list(groupsStart.items())
+    groupItems = list(groups.items())
     if sortOnGroupLen:  groupItems.sort(key=lambda i: len(i[1]), reverse=True)
     else:               groupItems.sort(key=lambda i: i[0], reverse=True)#groupK
 
@@ -451,7 +469,7 @@ def guiMinimalStartGroupsMode(groupsStart=None,grouppingRule=sizeBatching,\
         #selection button with related group info as label text
         groupBtnTxt = "groupK: " + keyStr + "\nnumElements: " + str(len(items))\
          + " size: "+str(cumulativeSize/2**20)+"MB dur: "+str(cumulativeDur/60)
-        tk.Button(ScrolledFrameGroup, text=groupBtnTxt,command=gotoGroup).pack()#TODO GRID?
+        tk.Button(ScrolledFrameGroup.interior, text=groupBtnTxt,command=gotoGroup).grid()
 
     rootTk.mainloop()
     return SelectedList
@@ -459,15 +477,35 @@ def guiMinimalStartGroupsMode(groupsStart=None,grouppingRule=sizeBatching,\
 if __name__ == "__main__": 
 
     startSearch="."
-    if argv[1]=="-h": print("usage: [start,selectionMode] ")
+    if len(argv)>1 and argv[1]=="-h": print("usage: [start,selectionMode,useDumpItemsFilepath] ")
     if len(argv)>1: startSearch=argv[1]
-    SEL_MODE="ITEMS" #"GROUPS"
+    SEL_MODE="GROUPS"#"ITEMS"
     if len(argv)>2: SEL_MODE=argv[2]
 
     SELECTION_LOGFILE="/tmp/selection"
-    grouppingFunc=ffmpegConcatFilterGroupping #ffmpegConcatDemuxerGroupping
-    if SEL_MODE=="GROUPS":
-        guiMinimalStartGroupsMode(startSearch,grouppingRule=grouppingFunc,drawGif=True,\
-            trgtActionExtraArgs=[True,True])
-    else:   itemsGridViewStart(list(GetItems(".").values()),drawGif=True)
+    grouppingFunc=ffmpegConcatDemuxerGroupping#ffmpegConcatFilterGroupping #
 
+    #avoid fs scan -> reuse previous scanned items  in a tuple list json serialized file
+    use_dump_items_founded=USE_DUMP_ITEMS_FOUNDED
+    if len(argv)>3: use_dump_items_founded,ITEMS_LAST_FOUND,GROUPS_LAST_FOUND=True,argv[2],argv[2]
+
+    start=perf_counter()
+
+    try:        dumpFp = open(ITEMS_LAST_FOUND, "r")
+    except:     use_dump_items_founded = False
+    if use_dump_items_founded:        items = [VidTuple(*x) for x in load(dumpFp)]
+    else:                             items = list(GetItems(startSearch, forceMetadataGen=False).values())
+    endItemsGet = perf_counter()
+    print("source items get in ", endItemsGet - start, "used previous dump ", use_dump_items_founded)
+    items = FilterItems(items, metadataPresent=False, gifPresent=DRAW_GIF, tumbnailPresent=(not DRAW_GIF),durationPos=False)
+    if not use_dump_items_founded: genMetadata(items)   #not possible gen missing metadata on named tuple
+    if DUMP_ITEMS_FOUNDED and not use_dump_items_founded: dump([i.toTupleList() for i in items],open(ITEMS_LAST_FOUND, "w"))
+
+    if SEL_MODE=="GROUPS":
+        groups=GetGroups(items,grouppingRule=grouppingFunc,startSearch=startSearch,filterTumbnail=(not DRAW_GIF),filterGif=DRAW_GIF)
+        endGroupGet=perf_counter()
+        print("source group get in",endGroupGet-endItemsGet,"used previous dump ",use_dump_items_founded)
+        groups=FilterGroups(groups,100,mode="dur") #filter small groups
+        guiMinimalStartGroupsMode(groups,trgtActionExtraArgs=[True,True])
+    else:       #ITEMS
+        itemsGridViewStart(items,drawGif=DRAW_GIF)

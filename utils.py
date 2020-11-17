@@ -92,10 +92,10 @@ def _stabMapFunc(args):
     
     item, function, errStr = args
     try:
-        if type(args)==type([]):    out = function(*item)
-        else:                       out = function(item)
+        if type(item)==type(tuple()):    out = function(*item)
+        else:                            out = function(item)
     except Exception as e:
-        print(errStr + " " + item, e)
+        print(errStr , " " , item, e)
         out = None
     return out
 def concurrentPoolProcess(workQueue, function, errStr, poolSize, poolStart=None):
