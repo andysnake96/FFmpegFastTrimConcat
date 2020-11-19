@@ -94,15 +94,6 @@ class Vid:
         if SAVE_GENERATED_METADATA: self.saveFullMetadata(metadataFull)
         else:                       return metadataFull
 
-    def play(self, playBaseCmd="ffplay -autoexit -fs "):
-        """play the Vid with the given playBaseCmd given """
-        cmd = playBaseCmd +"'"+self.pathName+"'"
-        # run(cmd.split())
-        # out=Popen(cmd.split(),stderr=DEVNULL,stdout=DEVNULL)
-        print("play: ", self.pathName,cmd)
-        #out = Popen(cmd.split(), stderr=DEVNULL, stdout=DEVNULL)
-        out = system(cmd+" 1>/dev/null 2>/dev/null &\n")
-
 
     def fromJson(self, serializedDict, deserializeDictJson=False):
         """
@@ -126,6 +117,17 @@ class Vid:
     def toTupleList(self):
         return VidTuple(self.nameID,self.pathName,self.sizeB,self.gifPath,self.imgPath,\
          self.metadataPath,self.metadata,self.duration,self.extension,self.cutPoints)
+        
+#support function
+def play(vid, playBaseCmd="ffplay -autoexit -fs "):
+    """play the Vid with the given playBaseCmd given """
+    cmd = playBaseCmd +"'"+vid.pathName+"'"
+    # run(cmd.split())
+    # out=Popen(cmd.split(),stderr=DEVNULL,stdout=DEVNULL)
+    print("play: ", vid.pathName,cmd)
+    #out = Popen(cmd.split(), stderr=DEVNULL, stdout=DEVNULL)
+    out = system(cmd+" 1>/dev/null 2>/dev/null &\n")
+
 
 def remove(vid, confirm=True):
     #remove this item, if confirm ask confirmation onthe backed terminal
@@ -148,8 +150,7 @@ def SerializeSelectionSegments(selectedItems, filename=None):
         if filename given output will be written to file
         return serialized json string
     """
-    outList = list()
-    for i in selectedItems: outList.append(i.__dict__)
+    outList = [ i.__dict__  for i in selectedItems ]
     serialization = dumps(outList, indent=2)
     if filename != None:
         f = open(filename, "w")
@@ -204,6 +205,8 @@ def genMetadata(vidItems):
     """ @param vidItems either dict nameId->Vid object or just list of vid object
         inplace add metadata
     """
+    start=perf_counter()
+
     itemsList=vidItems
     if type(vidItems)==type(dict()): itemsList=vidItems.values()
 
@@ -211,8 +214,8 @@ def genMetadata(vidItems):
     metadataFilesPathQueue = [i.pathName for i in metadataFilesQueue]  # src vid files path to generate metadata
     print("metadata to gen queue len:", len(metadataFilesPathQueue))
     if len(metadataFilesQueue) > POOL_TRESHOLD:  # concurrent version
-        processed = list(
-            concurrentPoolProcess(metadataFilesPathQueue, ffprobeMetadataGen, "metadata build err", POOL_SIZE))
+        processed = list(concurrentPoolProcess(metadataFilesPathQueue, ffprobeMetadataGen,\
+                "metadata build err", POOL_SIZE))
         # manually set processed metadata fields (pool.map work on different copies of objs)
         for i in range(len(metadataFilesPathQueue)):
             item, processedMetadata = metadataFilesQueue[i], processed[i]
@@ -223,6 +226,9 @@ def genMetadata(vidItems):
                 print("invalid metadata gen at ", item.pathName, file=stderr)
     else:  # sequential version if num of jobs is too little -> only pickle/spawn/... overhead in pool
         for item in metadataFilesQueue: item.genMetadata();
+    
+    end=perf_counter()
+    print("metadatas gen in:",end-start,"workPoolUsed:",len(metadataFilesQueue)>POOL_SIZE)
 
 def GetItems(rootPath=".", vidItems=dict(), PATH_ID=False,forceMetadataGen=FORCE_METADATA_GEN, limit=float("inf"), \
              followlinks=True,skipKw=FilterKW):
@@ -436,8 +442,76 @@ def _printCutPoints(cutPoints):  # print cutPoints as string vaild for  TrimSegm
         if end != None: outStr += str(end)
     return outStr
 
+trimSelectionPrompt="SKIP || QUIT || DEL || start START_TIME[,END_TIME] || ringRange ringCenter,[radiousNNDeflt] || hole HOLESTART HOLEEND\n\n"
+timeStrToNumeric=lambda s: s.replace(".","").replace(":","")
+def trimSegCommand(vid,cmd,start=0,end=None,newCmdOnErr=True,playVid=True,overwriteCutPoints=True):
+    """ 
+    parse @cmd to trim @vid, writing cutPoints field inplace
+    @Returns: cutPoints added to vid
+    specifiable default trimmedSeg @start or @end 
 
-def TrimSegmentsIterative(itemsList, skipNameList=None, dfltStartPoint=None, dfltEndPoint=None, RADIUS_DFLT=1.5,overwriteCutPoints=True):
+    eventual exception caused from a bad cmd are catched,
+    if @newCmdOnErr a new cmd will be prompted
+    @playVid: play the given vid beside parsing the given cmd
+
+    possible commands (short version with the first letter of the commands below)
+    start startTime[,endTime] -> just add a segment of the given next times (if not endTime use @end)
+    ringrange ringCenter[,radious] -> add a segment of ringCenter-radious,ringCenter+radious
+    hole hStart,hEnd->take the last selected segment (whole,dflt bounded, vid if not any) 
+                      and remove an hole creating 2 segs [lSegStart:hStart] [hEnd:lSegEnd]
+    """
+
+    if end == None: end=vid.duration
+    segmentationPoints = list()  #trim segmentation points for vid
+    fields = cmd.split()
+    replay=True
+    # iteration play-selection loop
+    while replay:   
+        replay=False
+        try:
+            for f in range(len(fields)):
+                # parse cmd fields
+                fieldCurr = fields[f].lower()
+
+                #start[,end]
+                if "start" in fieldCurr or "s" in fieldCurr:      
+                    startTime, endTime = parseTimeOffset(fields[f+1]),end
+                    if f+2 < len(fields) and timeStrToNumeric(fields[f+2]).isdigit():
+                        endTime = parseTimeOffset(fields[f + 2])
+                    segmentationPoints.append([startTime, endTime])
+                
+                #ringrange center[,radious]
+                elif "r" in fieldCurr or "ringRange" in fieldCurr:
+                    radious = RADIUS_DFLT
+                    center = parseTimeOffset(fields[f + 1], True) #convert to secs (float)
+                    if f + 2 < len(fields) and fields[f + 2].replace(".","").isdigit():   
+                        radious = float(fields[f + 2])
+                    segmentationPoints.append([str(center - radious), str(center + radious)])
+
+                # dig hole in the last seg (or the whole vid if not any), splitting it in 2 new segs
+                elif "hole" in fieldCurr or "h" in fieldCurr:  
+                    holeStart, holeEnd = parseTimeOffset(fields[f + 1]), parseTimeOffset(fields[f + 2])
+                    lastSeg = [start, end]
+                    if len(segmentationPoints) > 0: lastSeg = segmentationPoints.pop()
+                    #cut away the specified hole in the last segment
+                    hseg0, hseg1 = [lastSeg[0], holeStart], [holeEnd, lastSeg[1]]  # split the last seg in 2
+                    segmentationPoints.append(hseg0)
+                    segmentationPoints.append(hseg1)
+                
+        except Exception as e:
+            print("invalid cut cmd: ", cmd, e,"!!!!",file=stderr)
+            if newCmdOnErr: 
+                fields=input("re-enter a valid trim command:\n"+trimSelectionPrompt).split()
+                if playVid: play(vid,PLAY_CMD)
+                replay=True
+
+    print("selected these cutpoints:",segmentationPoints)
+    
+    if overwriteCutPoints:  vid.cutPoints.clear()
+    vid.cutPoints.extend(segmentationPoints)
+    return segmentationPoints
+
+def TrimSegmentsIterative(itemsList, skipNameList=None, dfltStartPoint=0, dfltEndPoint=None, overwriteCutPoints=True):
     """
     iterativelly play each Vid items and prompt for  select/replay video or trim in segments by specifing cut times
     segmentation times, if given will be embedded in cutPoints of Vid as a list of [[start,end],...]
@@ -446,74 +520,40 @@ def TrimSegmentsIterative(itemsList, skipNameList=None, dfltStartPoint=None, dfl
     @param itemsList:       Vid objects to play, select and cut with the promt cmd
     @param skipNameList:    pathnames of items not to play
     @param dfltStartPoint:  default start time for the first segment of each selected Vid
-    @param dfltEndPoint:    default end time for the last segmenet (if negative added to item duration) of each selected Vid
+    @param dfltEndPoint:    default end time for the last segment (if negative added to item duration) of each selected Vid
     @param overwriteCutPoints: if True old cutPoints in the given items will be overwritten with the new defined ones
     @return:  when no more video in itemsList or quitted inputted returned tuple
         thelist of selected itmes (along with embeded cut points), list skipped items) returned
     """
     selection,skipList = list(),list()
     ## handle fix start-end of videos
-    if dfltStartPoint == None: dfltStartPoint = 0  # clean
-    end = dfltEndPoint
+    tmpSelectionBackup=open(TMP_SEL_FILE,"w")
     for item in itemsList:
         if skipNameList != None and item.pathName in skipNameList: continue     #skip item
-        if end == None:             end = item.duration
-        elif end < 0:               end = item.duration + end
+        end = item.duration
+        if dfltEndPoint != None:             end = dfltEndPoint
+        elif end < 0:                        end += item.duration #seek from end
 
-        # iteration play-selection loop
-        item.play(" mpv --hwdec=auto ")
         if len(item.cutPoints)>0:
             print("curr cutPoints:\t", _printCutPoints(item.cutPoints))
             #drawSegmentsTurtle([item]) #TODO turtle.Terminator
+        
+        play(item,PLAY_CMD)
         # Prompt String
-        cmd = input("Add Vid with dur " +str(item.duration/60) + "min, size MB "+str(item.sizeB/2**20)+" to targets?? "
-             "  SKIP || QUIT || DEL [start START_TIME,END_TIME] [ringRange ringCenter,[radiousNNDeflt]] [hole HOLESTART HOLEEND ]\n\t")
-        if "SKIP" in cmd.upper() or cmd == "":
-            skipList.append(item)
-            continue
-        if "Q" in cmd.upper(): return selection, skipList
-        if "DEL" in cmd.upper(): remove(item); continue
-        fields = cmd.split()
-        segmentationPoints = list()  # new segmentation points for the vid
-        tmpSelectionBackup=open(TMP_SEL_FILE,"w")
-        replay=True
-        while replay:   
-            replay=False
-            try:
-                for f in range(len(fields)):#TODO separate parsing logic for simple GUI call
-                    # parse cmd fields
-                    fieldCurr = fields[f].lower()
-                    if "start" in fieldCurr or "s" in fieldCurr:
-                        startTime, endTime = parseTimeOffset(fields[f + 1]), end  # allocate seg with given start and default end time
-                        # retrieve end time if specified
-                        if f + 2 < len(fields):   endTime = parseTimeOffset(fields[f + 2])
-                        segmentationPoints.append([startTime, endTime])
+        cmd = input("Add Vid "+item.nameID+" dur " +str(item.duration/60) + "min, size "+\
+                str(item.sizeB/2**20)+"MB"+ trimSelectionPrompt)
 
-                    elif "rr" in fieldCurr or "ringRange" in fieldCurr:  # ring range center, radious
-                        radious = RADIUS_DFLT
-                        center = parseTimeOffset(fields[f + 1], True)
-                        if f + 2 < len(fields) and fields[f + 2].replace(".","").isdigit():   radious = float(fields[f + 2])
-                        segmentationPoints.append([str(center - radious), str(center + radious)])
+        if "SKIP" in cmd.upper() or cmd == "":  skipList.append(item);continue
+        if "Q" in cmd.upper():                  return selection, skipList
+        if "DEL" in cmd.upper():                remove(item); continue
 
-                    elif "hole" in fieldCurr:  # dig hole in the last seg, splitting it in 2 new segs
-                        holeStart, holeEnd = parseTimeOffset(fields[f + 1]), parseTimeOffset(fields[f + 2])
-                        lastSeg = [dfltStartPoint, end]
-                        #cut away the specified hole in the last segment of current item
-                        if len(segmentationPoints) > 0: lastSeg = segmentationPoints.pop()
-                        # resulting segments from the hole splitting
-                        hseg0, hseg1 = [lastSeg[0], holeStart], [holeEnd, lastSeg[1]]  # split the last seg in 2
-                        segmentationPoints.append(hseg0)
-                        segmentationPoints.append(hseg1)
-            except Exception as e:
-                print("invalid cut cmd: ", fields, "\t\t", e)
-                replay=True
-        item.cutPoints.extend(segmentationPoints)
-        if overwriteCutPoints:
-            item.cutPoints=segmentationPoints
+        trimSegCommand(item,cmd,dfltStartPoint,end,overwriteCutPoints=overwriteCutPoints)
+
         selection.append(item)
         #write selection to a tmp file with selected items json serialized to not lost partial selection
         tmpSelectionBackup.seek(0)
         tmpSelectionBackup.write(dumps([i.__dict__ for i in selection]))
+    tmpSelectionBackup.close()
     return selection, skipList
 
 def argParseMinimal(args):

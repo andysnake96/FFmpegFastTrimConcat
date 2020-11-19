@@ -4,7 +4,6 @@ from os import environ as env
 ### DUMP
 DUMP_ITEMS_FOUNDED=True                 #export
 USE_DUMP_ITEMS_FOUNDED = True
-GROUPS_LAST_FOUND="/tmp/lastGroups.json"
 ITEMS_LAST_FOUND="/tmp/lastItems.json"
 
 ### INTERNAL CONFIGURATION PARAMS
@@ -13,6 +12,7 @@ GIF_TUMBRL_EXTENSION = "gif"
 IMG_TUMBRL_EXTENSION = "jpg"
 VIDEO_MULTIMEDIA_EXTENSION = ["mp4", "wmw"] #TODO NameIdFirstDot ?
 METADATA_EXTENSION = "json"
+
 ##items scan
 SAVE_GENERATED_METADATA=True #save newly generated vids metadata
 if env.get("SAVE_GENERATED_METADATA") != None and "F" in env.get("SAVE_GENERATED_METADATA").upper():SAVE_GENERATED_METADATA=False
@@ -21,11 +21,15 @@ POOL_TRESHOLD = 100
 if "POOL_TRESHOLD" in env: POOL_TRESHOLD = int(env["POOL_TRESHOLD"])
 POOL_SIZE = 8
 if "POOL_SIZE" in env: POOL_SIZE = int(env["POOL_SIZE"])
+
 # var
 MIN_GROUP_DUR=196
 if "MIN_GROUP_DUR" in env: MIN_GROUP_DUR= int(env["MIN_GROUP_DUR"])
 MIN_GROUP_LEN=6
 if "MIN_GROUP_LEN" in env: MIN_GROUP_LEN= int(env["MIN_GROUP_LEN"])
+PLAY_CMD=" vlc " #" mpv --hwdec=auto "
+RADIUS_DFLT=1.596
+
 
 ##AUDIT
 AUDIT_VIDINFO=True #__str__ , 
@@ -38,13 +42,14 @@ QUIET=False
 if QUIET or "QUIET" in env and "F" in env["QUIET"].upper(): #disable audits
     QUIET,AUDIT_DSCPRINT,AUDIT_MISSERR,AUDIT_VIDINFO=True,False,False,False
     DEBUG=False
-
 DEBUG=False
 if "DEBUG" in env and "T" in env["DEBUG"].upper(): DEBUG=True
+TMP_SEL_FILE="/tmp/selection.tmp.list.json" #backup loc. IterativeTrimSelection at each select
 
-##GUI CONFIGURATION
+
+### GUI
 DISABLE_GUI = False
-TMP_SEL_FILE="/tmp/selection.tmp.list.json"
+SELECTION_LOGFILE="/tmp/selection"  #GUI selection file
 if "DISABLE_GUI" in env and "T" in env["DISABLE_GUI"].upper(): DISABLE_GUI = True
 BTN_SELECTED_THICKNESS=7
 BTN_NN_SELECTED_THICKNESS=1
@@ -58,10 +63,12 @@ BAR_W=18
 font = ("Arial", 15, "bold") #btn text font
 #gif
 MAX_FRAME_N=20
-GIF_UPDATE_POLL=196
+GIF_UPDATE_POLL=96
 DRAW_GIF=True   #if False, display just the tumbnails jpg if any
 NameIdFirstDot = True# IF TRUE the nameID will be extracted from a path name up to the first founded dot
 if env.get("NameIdFirstDot") != None and "F" in env["NameIdFirstDot"].upper(): NameIdFirstDot = False
+
+
 #export comma separated list of keyword to filter away items after a scan
 FilterKW=["frame","out","fake","group_","?","clips"]
 if env.get("FilterKW") != None: FilterKW=env["FilterKW"].split(",") 

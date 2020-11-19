@@ -64,25 +64,23 @@ def parseTimeOffset(timeStr, convertToSec=False):
     """
     parse time specification string (valid for ffmpeg), validating it, eventually converting it to seconds
     @param timeStr: time string like [HH]:MM:SS.dec. If not in the given format excpetion raied
-    @param convertToSec: if True @param timeStr parsed and converted to seconds
+    @param convertToSec: if True @param timeStr parsed and converted to seconds, else just str validation
     @return: validated timeStr, if convertToSec string converted to second
     """
     if type(timeStr) != str:  raise Exception("invalid time specification string type, expected str")
     secOffs = 0
     if ":" in timeStr:
-        # convert to second
         timeFields = timeStr.split(":")
-        if len(timeFields) not in [1, 2, 3]: raise Exception(
-            "invalid num of time fields in the time specification string, expected[HH]:[mm]:sec")
-        for f in range(len(timeFields)):
+        if len(timeFields) not in [1, 2, 3]:
+            raise Exception("invalid num of time fields in the time specification string, expected[HH]:[mm]:sec")
+        
+        for f in range(len(timeFields)):    #convert to second
             field = timeFields[len(timeFields) - 1 - f]  # secs, min, hour field of timeStr
-            if f == 0:
-                secOffs += (float(field))  # seconds
-            else:
-                secOffs += ((60 ** f) * float(field))  # min or hour
-    else:# given numerical timeStr -> seconds only
-        secOffs= float(timeStr)
-    if not convertToSec: return timeStr #only check on well formatted string
+            if f == 0: secOffs += (float(field))#sec
+            else:      secOffs += ((60 ** f) * float(field))# min||hour
+    else:        secOffs= float(timeStr) #just ammount of seconds given 
+
+    if not convertToSec: return timeStr
     return secOffs
 
 
@@ -124,10 +122,10 @@ def truncString(longStr,prefixToShow=9,suffixPatternToShowSep="/"):
     if longStr==None:                  return ""
     elif len(longStr)<=2*prefixToShow: return longStr
     
-    endPattern=longStr[:-prefixToShow]
-    if longStr.find(suffixPatternToShowSep) != -1:
+    endPattern=longStr[-prefixToShow:]
+    if suffixPatternToShowSep!=None and longStr.find(suffixPatternToShowSep) != -1:
         endPattern=longStr.split(suffixPatternToShowSep)[-1]
-    return longStr[:prefixToShow]+"...."+endPattern
+    return longStr[:prefixToShow]+"..."+endPattern
 
 TurtleImported=False
 def drawSegmentsTurtle(itemSegmentList, SCREEN_W=400, LINE_WIDTH_SEG=3, SEGS_FNAME=None):

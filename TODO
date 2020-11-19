@@ -1,6 +1,8 @@
-IMPORT FIX !!
+ora ci sono 2 serializzazioni:	obj <->json mediante __dict__
+				GUI obj->tupleList->json 
+		unificazione?
+
+piccoli problemi nella scrittura dello script trim :(
+
 concat.list + time cuts  in concat demuxer syntax --> Hope reverse ! :) XD
-scan -> support for segmentization??
-    meglio: scan override fpath list -filter- ?
-GUI MODULARITY
-DOC UP + README.md
+README.md

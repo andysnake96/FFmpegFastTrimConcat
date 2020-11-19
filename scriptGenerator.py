@@ -76,8 +76,8 @@ def GenTrimReencodinglessScriptFFmpeg(items, accurateSeek=False, outFname=None,
         @param accurateSeek: if True will be seeked as ffmpeg output option
             (-i inFilePath -ss -to instead of -ss -to -i inFilePath )
         @param outFname: if True, the generated script will be written in that path, 
-            otherwise printed to stdout
-        @param dstCutDir: path of 
+        @param dstCutDir: path of trimmed segments
+        @Returns:   script as a string
     """
     #clean dstCutDir
     dstCutDir=dstCutDir.strip()
@@ -86,35 +86,36 @@ def GenTrimReencodinglessScriptFFmpeg(items, accurateSeek=False, outFname=None,
     outLines = list()
     outLines.append("mkdir "+dstCutDir+" \n")
     outLines.append("FFMPEG=/home/andysnake/ffmpeg/bin/nv/ffmpeg_g #custom ffmpeg\n")
+    outLines.append("FFMPEG+=\"-loglevel error -hide_banner -n\"")
     for i in items:
         cutSubDir=dstCutDir+"/"+i.nameID+"/"
         outLines.append("mkdir '"+cutSubDir+"'\n")
         cutPointsNum = len(i.cutPoints)
         if cutPointsNum == 0: continue 
 
-        outLines.append("\n#SEGMENTS OF " + i.pathName + str(i.duration)+"\n")  
+        outLines.append("\n#SEGMENTS OF " + i.pathName +" \t"+ str(i.duration/60)+"mins \n")  
         ffmpegInputPath = " -i '" + i.pathName+"' "
         # for each segments embedded generate ffmpeg -ss -to -c copy ...
         for s in range(cutPointsNum):
             seg = i.cutPoints[s]
-            trimSegCmd = "eval $FFMPEG -loglevel error -hide_banner -n"
+            trimSegCmd = "eval $FFMPEG "
             if accurateSeek: trimSegCmd += ffmpegInputPath     #seek as output opt
             trimSegCmd += " -ss " + str(seg[0])
             if seg[1] != None: trimSegCmd += " -to " + str(seg[1])
             if not accurateSeek: trimSegCmd += ffmpegInputPath #seek as input opt
             trimSegCmd += " -c copy -avoid_negative_ts make_zero " #shift ts
             #name seg file with progressive suffix
-            dstPath= "'"+cutSubDir+i.pathName.split("/")[-1]+ "." + str(s) + ".mp4'"  
+            dstPath= " '"+cutSubDir+i.pathName.split("/")[-1]+ "." + str(s) + ".mp4'"  
             trimSegCmd+=dstPath
             outLines.append(trimSegCmd + "\n")
-        outLines.append("#rm " + i.pathName + "\n")  # commented remove cmd for currnt vid
+        outLines.append("#rm " + i.pathName + "\n"+"#"*22+"\n")  # commented remove cmd for currnt vid
 
     if outFname != None:
-        fp = open(outFname, "w")
+        fp = open(outFname, "a")
         fp.writelines(outLines)
         fp.close()
-    else:
-        print(outLines)
+    
+    return "\n".join(outLines)
 
 ### SEG CUT CMD GEN
 #RE-ENCODINGLESS
