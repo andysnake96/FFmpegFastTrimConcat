@@ -18,7 +18,7 @@
 from MultimediaManagementSys import *
 from grouppingFunctions import sizeBatching
 from utils import printList
-from configuration import MAX_FRAME_N,BAR_W
+from configuration import MAX_FRAME_N,SCROLLBAR_W,SEG_TRIM_ENTRY_WIDTH,JSON_INDENT
 from scriptGenerator import GenTrimReencodinglessScriptFFmpeg
 
 import tkinter as tk
@@ -99,9 +99,10 @@ def _select(selected):
         #times = [float(x) for x in SegSelectionTimes.get().strip().split(" ") ] #ITERATIVE_TRIM_SEL CALL LOGIC
         #selected.cutPoints.extend([times])
 
-        trimPoints=trimSegCommand(selected,SegSelectionTimes.get().strip(),newCmdOnErr=False,playVid=False)
+        trimPoints=trimSegCommand(selected,SegSelectionTimes.get().strip(),newCmdOnErr=False)
         if len(trimPoints)>0:
             SelectedList.append(selected)
+            print("cut commands:",selected.trimCmds,"cut points:",selected.cutPoints,sep="\n")
             button.flash()
             btnSel(button,"blue")
         return
@@ -120,11 +121,12 @@ def _select(selected):
 
 def _flushSelectedItems(selected=SelectedList,logFile=SELECTION_LOGFILE):
     global SelectedList,btns
-
-    if len(selected)==0:    return
+    
+    if len(selected)==0:    print("nothing selected!!",file=stderr);return
     cumulSize,cumulDur= 0,0
-    selected=[i.pathName+"\n" for i in selected if len(i.cutPoints)==0]
     toTrim  =[i for i in selected if len(i.cutPoints)>0]
+    selected=[i.pathName+"\n" for i in selected if len(i.cutPoints)==0]
+    
     cumulDur=sum([i.duration for i in selected])
     cumulSize=sum([i.sizeB   for i in selected])
     #write selected
@@ -163,7 +165,7 @@ class VerticalScrolledFrame(tk.Frame):
         tk.Frame.__init__(self, parent, *args, **kw)
 
         # create a canvas object and a vertical scrollbar for scrolling it
-        vscrollbar = tk.Scrollbar(self, orient=tk.VERTICAL,width=BAR_W,activebackground="green",bg="green")
+        vscrollbar = tk.Scrollbar(self, orient=tk.VERTICAL,width=SCROLLBAR_W,activebackground="green",bg="green")
         vscrollbar.pack(fill=tk.Y, side=tk.LEFT, expand=tk.FALSE)
         canvas = tk.Canvas(self, bd=0, highlightthickness=0, width=CANV_W,height=CANV_H, yscrollcommand=vscrollbar.set)
         # canvas.configure(scrollregion=canvas.bbox("all"))
@@ -329,6 +331,7 @@ def drawItems(items,drawGif,mainFrame):
             cutStr=str(item.cutPoints).replace(" ","").replace("],"," ").replace(",","-").replace("[","").replace("]","").replace("'","")
             txt += "\ncuts#="+str(len(item.cutPoints))+\
                     truncString(": "+cutStr,14,suffixPatternToShowSep=None)
+        if len(item.trimCmds)> 0:  txt+="\nbackUpCmds#="+str(len(item.trimCmds))
         
         if drawGif:
             btn.configure(command=funcTmp,text=txt, \
@@ -411,7 +414,7 @@ def itemsGridViewStart(itemsSrc,subWindow=False,drawGif=False,sort="size"):
         variable=SegSelectionMode) #TODO also flush->add: , command=_flushSelectedItems)
     segSelectionEnable.grid(row=1, column=0)
 
-    SegSelectionTimes = tk.Entry(buttonFrame,width=100)
+    SegSelectionTimes = tk.Entry(buttonFrame,width=SEG_TRIM_ENTRY_WIDTH)
     SegSelectionTimes.insert(0, "start 10 20 ringrange 40 2 start 100 296 hole 155 175")
     SegSelectionTimes.grid(row=1, column=1)
 
@@ -488,25 +491,27 @@ if __name__ == "__main__":
     startSearch="."
     SEL_MODE="GROUPS"#"ITEMS"
     use_dump_items_founded=USE_DUMP_ITEMS_FOUNDED
+    mergeDumpedCutpoints=False
     grouppingFunc=ffmpegConcatDemuxerGroupping#ffmpegConcatFilterGroupping #
 
-    if len(argv)>1 and argv[1]=="-h": 
-        print("usage: [startPathSearch,selectionMode,useDumpItemsFilepath]")
+    if len(argv)>1 and "-h" in argv[1]:
+        print("usage: [startPathSearch,selectionMode,useDumpItemsFilepath,rescanAndMergeCutpoints]")
         exit(1)
     
     if len(argv)>1: startSearch=argv[1]
     if len(argv)>2: SEL_MODE=argv[2]
-    if len(argv)>3: 
-        use_dump_items_founded,ITEMS_LAST_FOUND=True,argv[2]
+    if len(argv)>3: use_dump_items_founded,ITEMS_LAST_FOUND=True,argv[3]
+    if len(argv)>4: mergeDumpedCutpoints=True
 
     ##Get items scanning fs or using previous backup
     start=perf_counter()
-    try:   #avoid fs scan reusing previous scanned items in a tuple list json serialized
+    try:#avoid fs scan reusing previous scanned items 
                 if use_dump_items_founded:  dumpFp = open(ITEMS_LAST_FOUND, "r")
-                print(stat(ITEMS_LAST_FOUND))
+                print("stat of",ITEMS_LAST_FOUND,stat(ITEMS_LAST_FOUND))
     except:     use_dump_items_founded = False
 
-    if use_dump_items_founded:  items = [VidTuple(*x) for x in load(dumpFp)]
+    if use_dump_items_founded and not mergeDumpedCutpoints:
+            items = deserializeSelection(dumpFp)
     else:   items = list(GetItems(startSearch, forceMetadataGen=False).values())
     endItemsGet = perf_counter()
     print("source items get in",endItemsGet-start,"used previous dump:",use_dump_items_founded)
@@ -514,7 +519,8 @@ if __name__ == "__main__":
             gifPresent=DRAW_GIF, tumbnailPresent=(not DRAW_GIF),durationPos=False)
 
     if not use_dump_items_founded: genMetadata(items)   #tuplelist are readOnly
-
+    if mergeDumpedCutpoints:
+            updateCutpointsFromSerialization(items,deserializeSelection(dumpFp))
     ##selection mode
     if SEL_MODE=="GROUPS":
         groups=GetGroups(items,grouppingRule=grouppingFunc,startSearch=startSearch,\
@@ -528,6 +534,7 @@ if __name__ == "__main__":
 
     else:   raise Exception("invalid input selectionMode "+SEL_MODE+" not in [GROUPS,ITEMS]")
 
-    if DUMP_ITEMS_FOUNDED: #dump as tuplelist, eventually with new cutpoints
-        if use_dump_items_founded:  dump(items,open(ITEMS_LAST_FOUND, "w"))
-        else: dump([i.toTupleList() for i in items],open(ITEMS_LAST_FOUND, "w"))
+    if DUMP_ITEMS_FOUNDED:
+        if use_dump_items_founded and not mergeDumpedCutpoints:
+            dump(items,open(ITEMS_LAST_FOUND, "w"),indent=JSON_INDENT)
+        else: SerializeSelection(items,filename=ITEMS_LAST_FOUND)

@@ -1,8 +1,7 @@
 ora ci sono 2 serializzazioni:	obj <->json mediante __dict__
 				GUI obj->tupleList->json 
-		unificazione?
-
-piccoli problemi nella scrittura dello script trim :(
+meglio migrare alla prima, con supporto a estensione selezione.
+	e.g.: parto da scansione, sovrascrivo elementi GIA PRESENTI(del obsoleti) con prev dump
 
 concat.list + time cuts  in concat demuxer syntax --> Hope reverse ! :) XD
 README.md

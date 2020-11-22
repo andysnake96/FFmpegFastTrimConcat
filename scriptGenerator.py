@@ -84,18 +84,20 @@ def GenTrimReencodinglessScriptFFmpeg(items, accurateSeek=False, outFname=None,
     if dstCutDir[-1]=="/": dstCutDir=dstCutDir[:-1]
 
     outLines = list()
-    outLines.append("mkdir "+dstCutDir+" \n")
-    outLines.append("FFMPEG=/home/andysnake/ffmpeg/bin/nv/ffmpeg_g #custom ffmpeg\n")
-    outLines.append("FFMPEG+=\"-loglevel error -hide_banner -n\"")
+    outLines.append("mkdir -p "+dstCutDir+" \n")
+    outLines.append("FFMPEG='~/ffmpeg' #/home/andysnake/ffmpeg/bin/nv/ffmpeg_g #custom ffmpeg\n")
+    outLines.append("FFMPEG+=\"-loglevel error -hide_banner -n \"  \n")
     for i in items:
         cutSubDir=dstCutDir+"/"+i.nameID+"/"
-        outLines.append("mkdir '"+cutSubDir+"'\n")
+        outLines.append("mkdir -p '"+cutSubDir+"'\n")
         cutPointsNum = len(i.cutPoints)
         if cutPointsNum == 0: continue 
-
+        #information headers
         outLines.append("\n#SEGMENTS OF " + i.pathName +" \t"+ str(i.duration/60)+"mins \n")  
+        outLines.append("\n#cut cmds: "+str(i.trimCmds)+"\n")
+        
+        # for each segments embedded generate ffmpeg -ss -to -i vid.pathName -c copy ...
         ffmpegInputPath = " -i '" + i.pathName+"' "
-        # for each segments embedded generate ffmpeg -ss -to -c copy ...
         for s in range(cutPointsNum):
             seg = i.cutPoints[s]
             trimSegCmd = "eval $FFMPEG "

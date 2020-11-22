@@ -5,6 +5,7 @@ from os import environ as env
 DUMP_ITEMS_FOUNDED=True                 #export
 USE_DUMP_ITEMS_FOUNDED = True
 ITEMS_LAST_FOUND="/tmp/lastItems.json"
+JSON_INDENT=1	#json serialization file indentation
 
 ### INTERNAL CONFIGURATION PARAMS
 # vid files handled extensions
@@ -58,8 +59,9 @@ if "GUI_COLSIZE" in env: GUI_COLSIZE=int(env["GUI_COLSIZE"])
 GUI_ITEMS_LIMIT = 250   #tkinter's own limit on how mutch obj to display ...
 THRESHOLD_KEY_PRINT=250  #max chars to show in a button
 #ITEMS'GRIDDED FRAME
+SEG_TRIM_ENTRY_WIDTH=120
 CANV_W,CANV_H=1900,1000
-BAR_W=18
+SCROLLBAR_W=18    
 font = ("Arial", 15, "bold") #btn text font
 #gif
 MAX_FRAME_N=20

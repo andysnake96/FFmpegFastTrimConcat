@@ -51,23 +51,13 @@ from argparse import ArgumentParser
 from json import loads, dumps, dump
 from time import perf_counter
 
-
-
-if not DISABLE_GUI:  # try to enable GUI importing GUI module (with its tkinter dependencies ...)
-    try:
-        from GUI import *
-        print("GUI imported")
-    except Exception as e:
-        print("not importable GUI module", e)
-        DISABLE_GUI = True
-
 attributes = ["nameID","pathName", "sizeB", "gifPath","imgPath","metadataPath",\
-     "metadata","duration", "extension","cutPoints"]
+     "metadata","duration", "extension","cutPoints","trimCmds"]
 VidTuple = namedtuple("Vid", attributes)
 
 class Vid:
     """Video items attributes plus useful operation on an item"""
-    def __init__(self, multimediaNameK,path=None):
+    def __init__(self, multimediaNameK):
         self.nameID = multimediaNameK  # AS UNIQUE ID -> MULTIMEDIA NAME (no path and no suffix)
         #default init of other fields
         self.pathName =path
@@ -78,8 +68,9 @@ class Vid:
         self.metadata =None #list of vid's strams metadata (ffprobe output)
         self.duration = 0  # num of secs for the duration
         self.extension = None
-        #cut times for segment generation as [[start,end],...]  (support for SelectItemPlay)
-        self.cutPoints = list()  
+        
+        self.cutPoints = list() #cut times for segments generation [[start,end],...] 
+        self.trimCmds  = list() #cmds to gen cutPoints (just for quick segs backup)
 
     def __str__(self):
         outS="Item: id:"+self.nameID+" path: " + truncString(self.pathName) + \
@@ -97,9 +88,9 @@ class Vid:
 
     def fromJson(self, serializedDict, deserializeDictJson=False):
         """
-        @param  serializedDict:  dict attributes if this class
-        @param  deserializeDictJson: if true serializedDict is json serialized string
-        @return:current VidI object with overwritten attributes
+        @param  deserializeDictJson: if true @serializedDict is json serialized string
+                otherwhise is just a python dict with the target attributes to set
+        @return:current Vid object with overwritten attributes
         """
         deserializedDict = serializedDict
         if deserializeDictJson: deserializedDict = loads(serializedDict)
@@ -114,9 +105,10 @@ class Vid:
         dump(metadata, dstFp)
         dstFp.close()
     
-    def toTupleList(self):
+    def toTuplelist(self):
+        """ save ram converting to a namedtuple the current object """
         return VidTuple(self.nameID,self.pathName,self.sizeB,self.gifPath,self.imgPath,\
-         self.metadataPath,self.metadata,self.duration,self.extension,self.cutPoints)
+         self.metadataPath,self.metadata,self.duration,self.extension,self.cutPoints,self.trimCmds)
         
 #support function
 def play(vid, playBaseCmd="ffplay -autoexit -fs "):
@@ -144,14 +136,16 @@ def remove(vid, confirm=True):
     return False
 
 ### (de) serialization of Vids list
-def SerializeSelectionSegments(selectedItems, filename=None):
+def SerializeSelection(selectedItems, filename=None,toTuple=True):
     """
-        trivial serialization given selectedItems in json using __dict__
-        if filename given output will be written to file
-        return serialized json string
+        trivial serialization given @selectedItems in json 
+        using namedtuple or  __dict__ ( accordingly to @toTuple)
+        if @filename given output will be written to file
+        @Returns serialized json string
     """
-    outList = [ i.__dict__  for i in selectedItems ]
-    serialization = dumps(outList, indent=2)
+    if toTuple: outList = [ i.toTuplelist() for i in selectedItems ]
+    else:            outList = [ i.__dict__  for i in selectedItems ]
+    serialization = dumps(outList, indent=JSON_INDENT)
     if filename != None:
         f = open(filename, "w")
         f.write(serialization)
@@ -159,13 +153,34 @@ def SerializeSelectionSegments(selectedItems, filename=None):
     return serialization
 
 
-def DeserializeSelectionSegments(serializedItemsStr):
-    """ deserialize json list of Vid.__dict__ into list of vid items"""
-    deserialized = loads(serializedItemsStr)
-    out = list()
-    for i in deserialized:      out.append(Vid("").fromJson(i))
-    print("deserialized: ", len(out), " items")
+def _deserializeSelection(dumpFp):  #TODO DEPRECATED
+    """ deserialize json list of Vid.__dict__ into list of vid items objects"""
+    if type(deserialized[0]) == type(dict()): #TODO object old json serialization
+        out = [ Vid(None).fromJson(i) for i in load(dumpFp)] #tuplelist serializ.
+    else: out=[VidTuple(*x) for x in load(dumpFp)]
     return out
+
+def deserializeSelection(dumpFp,backupCopyPath="/tmp/selectionBackup.json"):
+    """ deserialize json list vid itemas as namedtuple 
+		if backupCopyPath != None: save a copy of dumpFp to backupCopyPath
+	"""
+    serializedStr=dumpFp.read()
+    serialized=loads(serializedStr)
+    out=[VidTuple(*x) for x in serialized]
+    if backupCopyPath: open(backupCopyPath,"w").write(serializedStr)
+    return out
+
+def updateCutpointsFromSerialization(items,itemsDumped):
+    """update cutPoints fields of Vid in @items list 
+       with the ones in items in @itemsDumped list if they have a common nameId field
+	"""
+    it = { items[i].nameID:i for i in range(len(items)) }
+    for i in itemsDumped: 
+        #update items matching nameid with corresponding dumped ones
+        if i.nameID in it:  
+                target=items[it[i.nameID]]
+                target.cutPoints=i.cutPoints
+                target.trimCmds=i.trimCmds
 
 ### Vid Item gather from filesystem
 def extractExtension(filename, PATH_ID,nameIdFirstDot=NameIdFirstDot):
@@ -308,12 +323,6 @@ def GetItems(rootPath=".", vidItems=dict(), PATH_ID=False,forceMetadataGen=FORCE
     return vidItems
 
 
-def ConvertItemsTuplelist(items):
-    #convert Vid items to Tuplelist
-    out=list()
-    for i in items: out.append(i.toTupleList())
-    return out
-
 def GetGroups(srcItems=None, grouppingRule=ffmpegConcatDemuxerGroupping,startSearch=".",\
     filterTumbnail=False,filterGif=False):
     """
@@ -444,7 +453,7 @@ def _printCutPoints(cutPoints):  # print cutPoints as string vaild for  TrimSegm
 
 trimSelectionPrompt="SKIP || QUIT || DEL || start START_TIME[,END_TIME] || ringRange ringCenter,[radiousNNDeflt] || hole HOLESTART HOLEEND\n\n"
 timeStrToNumeric=lambda s: s.replace(".","").replace(":","")
-def trimSegCommand(vid,cmd,start=0,end=None,newCmdOnErr=True,playVid=True,overwriteCutPoints=True):
+def trimSegCommand(vid,cmd,start=0,end=None,newCmdOnErr=True,overwriteCutPoints=True,backUpCmdsFile="/tmp/trimCmds.string"):
     """ 
     parse @cmd to trim @vid, writing cutPoints field inplace
     @Returns: cutPoints added to vid
@@ -452,7 +461,6 @@ def trimSegCommand(vid,cmd,start=0,end=None,newCmdOnErr=True,playVid=True,overwr
 
     eventual exception caused from a bad cmd are catched,
     if @newCmdOnErr a new cmd will be prompted
-    @playVid: play the given vid beside parsing the given cmd
 
     possible commands (short version with the first letter of the commands below)
     start startTime[,endTime] -> just add a segment of the given next times (if not endTime use @end)
@@ -502,13 +510,20 @@ def trimSegCommand(vid,cmd,start=0,end=None,newCmdOnErr=True,playVid=True,overwr
             print("invalid cut cmd: ", cmd, e,"!!!!",file=stderr)
             if newCmdOnErr: 
                 fields=input("re-enter a valid trim command:\n"+trimSelectionPrompt).split()
-                if playVid: play(vid,PLAY_CMD)
+                play(vid,PLAY_CMD)
                 replay=True
 
-    print("selected these cutpoints:",segmentationPoints)
+    #backup the cmds 
+    try:
+        if backUpCmdsFile!=None:
+            open(backUpCmdsFile,"a").write(vid.pathName+"\t"+cmd+"\n")
+    except: print("failed to open backUpCmdsFile:",backUpCmdsFile,"to append:",cmd)
     
+    #embed cutpoints 
     if overwriteCutPoints:  vid.cutPoints.clear()
     vid.cutPoints.extend(segmentationPoints)
+    
+    print("selected these cutpoints:",segmentationPoints,"with cmd:\t"+cmd,sep="\n")
     return segmentationPoints
 
 def TrimSegmentsIterative(itemsList, skipNameList=None, dfltStartPoint=0, dfltEndPoint=None, overwriteCutPoints=True):
@@ -561,25 +576,33 @@ def argParseMinimal(args):
     parser = ArgumentParser(
         description=__doc__ + '\nMagment of vid clips along with their metadata and tumbnails with an optional minimal GUI')
     parser.add_argument("pathStart", type=str, help="path to start recursive search of vids")
-    parser.add_argument("--operativeMode", type=str, default="TUMBNAIL_MANAGMENT",choices=["TUMBNAIL_MANAGMENT", "ITERATIVE_TRIM_SELECT","CONVERT_SELECTION_FILE_TRIM_SCRIPT"],
-                        help="Operating mode, TUMBNAIL_MANAGMENT(dflt, require GUI): select videos with a GUI grid view of tumbnails, ITERATIVE_TRIM_SELECT: select and trim vids 1 at time")
+
+    parser.add_argument("--operativeMode", type=str, default="ITERATIVE_TRIM_SELECT",choices=["ITERATIVE_TRIM_SELECT","CONVERT_SELECTION_FILE_TRIM_SCRIPT"],
+                        help="Operating mode, ITERATIVE_TRIM_SELECT: select and trim vids 1 at time;CONVERT_SELECTION_FILE_TRIM_SCRIPT: convert serialized selection to a ffmpeg cut script")
+    
+    parser.add_argument("--videoTrimOldSelectionFile", type=str, default=None,help="ols json serialized selection file")
     parser.add_argument("--videoTrimOldSelectionFileAction", type=str, default="SKIP",choices=["SKIP","MERGE","REVISION"],
                         help="action to do with the content of the old selection file:"
                         "SKIP -> skip old selected items but append to new selection,"
-                        "MERGE ->  these items with their cutpoints to the new items, then go totrim selection loop, "
+                        "MERGE ->  merge saved items with cutpoints to the new items, then go totrim selection loop, "
                         "REVISION -> overwrite cut points of the old selected items, not search for other vids")
-    parser.add_argument("--videoTrimOldSelectionFile", type=str, default=None,help="ols json serialized selection file")
-    parser.add_argument("--dstCutDir", type=str, default="cuts",help="dir where to save trimmed segments, default same dir of source vids")
-    parser.add_argument("--videoTrimSelectionStartTime", type=float, default=None,help="default start time for the selected video in ITERATIVE_TRIM_SELECT operating Mode")
-    parser.add_argument("--videoTrimSelectionEndTime", type=float, default=None,help="default end time for the selected video in ITERATIVE_TRIM_SELECT operating Mode, if negative added to the end of current vid in selection...")
+
+    parser.add_argument("--dstCutDir", type=str, default="cuts",help="dir where to save trimmed segments, default ./cuts/ ")
+
+    parser.add_argument("--videoTrimSelectionStartTime", type=float, default=None,\
+        help="default start time for the selected videos in ITERATIVE_TRIM_SELECT operating Mode")
+    parser.add_argument("--videoTrimSelectionEndTime", type=float, default=None,\
+    help="default end time for the selected video in ITERATIVE_TRIM_SELECT operating Mode, if negative added to the end of current vid in selection...")
+    
     parser.add_argument("--videoTrimSelectionOutput", type=int, default=2, choices=[0, 1, 2],
-                        help="logging mode of ITERATIVE_TRIM_SELECT mode: 0 (dflt) json serialization of selected file with embeddd cut points, 1 bash ffmpeg trim script with -ss -to -c: copy -avoid_negative_ts (commented rm source files lines ), 2 both")
+                        help="output mode of ITERATIVE_TRIM_SELECT mode: 0 (dflt) json serialization of selected file with embeddd cut points, 1 bash ffmpeg trim script with -ss -to -c: copy -avoid_negative_ts (commented rm source files lines ), 2 both")
+
     parser.add_argument("--selectionMode", type=str, default="GROUP", choices=["ALL", "GROUP"],
-                        help="selection mode of vids to serve to operativeMode: either ALL (all vids founded taken), GROUP (dflt selected vids in groups obtained with grouppingRule opt)")
+                        help="how to select the items for ITERATIVE_TRIM_SELECT,either  ALL (all vids founded taken), GROUP (dflt selected vids in groups obtained with grouppingRule opt)")
     parser.add_argument("--grouppingRule", type=str, default=ffmpegConcatDemuxerGroupping.__name__,choices=list(GrouppingFunctions.keys()), help="groupping mode of items")
     parser.add_argument("--groupFiltering", type=str, default="both",choices=["len","dur","both"],help="filtering mode of groupped items: below len or duration threshold the group will be filtered away")
-    parser.add_argument("--itemsSorting", type=str, default="shuffle",choices=["shuffle", "size", "duration", "nameID"],
-                        help="how sort items in the GUI when showed the tumbnails ")
+    parser.add_argument("--itemsSorting", type=str, default="shuffle",choices=["shuffle", "size", "duration", "nameID"],help="how sort items ")
+
     nsArgParsed = parser.parse_args(args)
     nsArgParsed.grouppingRule = GrouppingFunctions[nsArgParsed.grouppingRule]   #set groupping function by selected name
 
@@ -595,26 +618,19 @@ if __name__ == "__main__":
     if not skipSelection:
         items = list(GetItems(nsArgParsed.pathStart).values())
         items=FilterItems(items)
+
         if nsArgParsed.selectionMode == "GROUP":
             groups = GetGroups(items, grouppingRule=nsArgParsed.grouppingRule)
             #filter groups
             minSize=MIN_GROUP_LEN
             if nsArgParsed.groupFiltering == "dur": minSize=MIN_GROUP_DUR
             groups=FilterGroups(groups,minSize,nsArgParsed.groupFiltering)
-    # GUI based selection of vid items
-    if nsArgParsed.operativeMode == "TUMBNAIL_MANAGMENT":  # sorting hardcoded TODO partial arg pass
-        if DISABLE_GUI: raise Exception(
-            "unable to start tumbnails grid with tkinter, enable GUI with enviorn variable: export DISABLE_GUI=False")
-        if nsArgParsed.selectionMode == "GROUP":
-            guiMinimalStartGroupsMode(groupsStart=groups)
-        elif nsArgParsed.selectionMode == "ALL":
-            itemsGridViewStart(list(items.values()))
 
     elif nsArgParsed.operativeMode=="ITERATIVE_TRIM_SELECT":
         # recoverSelectionOld
         oldSelection,skipOldNames = list(),None
         if nsArgParsed.videoTrimOldSelectionFile != None:  # extend current new selection with the old one
-            oldSelection = DeserializeSelectionSegments(open(nsArgParsed.videoTrimOldSelectionFile).read())
+            oldSelection = deserializeSelection(open(nsArgParsed.videoTrimOldSelectionFile).read())
             if nsArgParsed.videoTrimOldSelectionFileAction=="REVISION": items=oldSelection
             elif nsArgParsed.videoTrimOldSelectionFileAction=="SKIP": skipOldNames = [item.pathName for item in oldSelection]
             elif nsArgParsed.videoTrimOldSelectionFileAction=="MERGE": items+=oldSelection
@@ -631,9 +647,9 @@ if __name__ == "__main__":
         selected.extend(oldSelection)
         # output selection
         logging = nsArgParsed.videoTrimSelectionOutput
-        if logging == 0 or logging == 2: SerializeSelectionSegments(selected, SELECTION_FILE)
+        if logging == 0 or logging == 2: SerializeSelection(selected, SELECTION_FILE)
         if logging == 1 or logging == 2: GenTrimReencodinglessScriptFFmpeg(selected, outFname=TRIM_RM_SCRIPT,dstCutDir=nsArgParsed.dstCutDir)
     elif nsArgParsed.operativeMode == "CONVERT_SELECTION_FILE_TRIM_SCRIPT":
-        oldSelection = DeserializeSelectionSegments(open(nsArgParsed.videoTrimOldSelectionFile).read())
+        oldSelection = deserializeSelection(open(nsArgParsed.videoTrimOldSelectionFile).read())
         GenTrimReencodinglessScriptFFmpeg(oldSelection, outFname=TRIM_RM_SCRIPT)
     else:   raise Exception("BAD OPERATIVE MODE")
