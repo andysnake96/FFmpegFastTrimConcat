@@ -62,10 +62,11 @@ THRESHOLD_KEY_PRINT=250  #max chars to show in a button
 SEG_TRIM_ENTRY_WIDTH=120
 CANV_W,CANV_H=1900,1000
 SCROLLBAR_W=18    
+if "SCROLLBAR_W" in env: SCROLLBAR_W=int(env["SCROLLBAR_W"])
 font = ("Arial", 15, "bold") #btn text font
 #gif
 MAX_FRAME_N=20
-GIF_UPDATE_POLL=96
+GIF_UPDATE_POLL=46
 DRAW_GIF=True   #if False, display just the tumbnails jpg if any
 NameIdFirstDot = True# IF TRUE the nameID will be extracted from a path name up to the first founded dot
 if env.get("NameIdFirstDot") != None and "F" in env["NameIdFirstDot"].upper(): NameIdFirstDot = False

@@ -46,7 +46,7 @@ def extractMetadataFFprobeJson(metadata):
         return fileSize, streamsDictMetadata, float(dur)
     except Exception as e:
         print("Misformed metdata",e,file=stderr)
-        return None,None,None
+        return 0,None,None
 
 
 def parseMultimedialStreamsMetadata(fname):

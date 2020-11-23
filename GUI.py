@@ -384,9 +384,11 @@ def itemsGridViewStart(itemsSrc,subWindow=False,drawGif=False,sort="size"):
     # root.resizable(True,True)
 
     items=None
-    if drawGif:     items=FilterItems(itemsSrc,gifPresent=True,metadataPresent=False,durationPos=False) #TODO TEST WITH STUB VID -> NO METADATA GENNABLE
+    if drawGif:     items=FilterItems(itemsSrc,gifPresent=True,metadataPresent=True,durationPos=False) #TODO TEST WITH STUB VID -> NO METADATA GENNABLE
     else:           items=FilterItems(itemsSrc,tumbNailPresent=True)
-
+    for i in items:
+        if i.sizeB == None:
+            print(i)
     assert len(items)>0,"FILTERED ALL ITEMS"
     if DEBUG:       print("items to draw:");printList(items)
     #items=[i for i in itemsSrc if i!=None and i.pathName!=None and i.imgPath!=None]
@@ -514,7 +516,7 @@ if __name__ == "__main__":
             items = deserializeSelection(dumpFp)
     else:   items = list(GetItems(startSearch, forceMetadataGen=False).values())
     endItemsGet = perf_counter()
-    print("source items get in",endItemsGet-start,"used previous dump:",use_dump_items_founded)
+    print(len(items),"source items get in",endItemsGet-start,"used previous dump:",use_dump_items_founded)
     items = FilterItems(items, metadataPresent=False,\
             gifPresent=DRAW_GIF, tumbnailPresent=(not DRAW_GIF),durationPos=False)
 

@@ -60,7 +60,7 @@ class Vid:
     def __init__(self, multimediaNameK):
         self.nameID = multimediaNameK  # AS UNIQUE ID -> MULTIMEDIA NAME (no path and no suffix)
         #default init of other fields
-        self.pathName =path
+        self.pathName = None
         self.sizeB = 0
         self.gifPath = None
         self.imgPath = None
@@ -156,7 +156,7 @@ def SerializeSelection(selectedItems, filename=None,toTuple=True):
 def _deserializeSelection(dumpFp):  #TODO DEPRECATED
     """ deserialize json list of Vid.__dict__ into list of vid items objects"""
     if type(deserialized[0]) == type(dict()): #TODO object old json serialization
-        out = [ Vid(None).fromJson(i) for i in load(dumpFp)] #tuplelist serializ.
+        out = [ Vid("").fromJson(i) for i in load(dumpFp)] #tuplelist serializ.
     else: out=[VidTuple(*x) for x in load(dumpFp)]
     return out
 
@@ -293,6 +293,7 @@ def GetItems(rootPath=".", vidItems=dict(), PATH_ID=False,forceMetadataGen=FORCE
                 if item.pathName != None: 
                     print("already founded a vid with same nameID",item.nameID,item.pathName,\
                     fpath," ... overwriting field",file=stderr);doubleCounter+=1
+                if type(fpath) != type(""): raise Exception("?")
                 item.pathName = fpath
                 item.extension=extension
 
@@ -425,7 +426,8 @@ def FilterItems(items, pathPresent=True,tumbnailPresent=False,gifPresent=False,\
         for kw in filterKW:
             if not keep or kw in i.pathName:
                 keep=False
-                print("filtered keyword",kw," at ",i.pathName)
+                if i.pathName != None and kw in i.pathName: 
+                    print("filtered keyword",kw," at ",i.pathName)
                 break
         if keep:    outList.append(i)
 
