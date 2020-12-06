@@ -145,7 +145,7 @@ if __name__ == "__main__":
         opt = nsArgParsed.__dict__[k]
         if opt != None: segGenConfig[k] = opt
     # env override
-    selectTargetItems = "TAKE_ALL_MOST_POPOLOUS"
+    selectTarScanItems = "TAKE_ALL_MOST_POPOLOUS"
     startPath = nsArgParsed.pathStart
     Take = nsArgParsed.groupSelectionMode
     GUI_SELECT_GROUP_ITEMS = True  # if ITERATIVE_PLAY_CONFIRM: select group on gui
@@ -154,7 +154,7 @@ if __name__ == "__main__":
     if PATH_SEP in nsArgParsed.pathStart: startPath = nsArgParsed.pathStart.split(PATH_SEP)
     mItemsDict, grouppingsOld = dict(), dict()
     for path in startPath:
-        mItemsDict = GetItems(path, mItemsDict, False)
+        mItemsDict = ScanItems(path, mItemsDict, False)
     items=FilterItems(mItemsDict.values())
     ### GROUP VIDEOS BY COMMON PARAMS IN METADATA
     #either group excluding some metadata field, or group by specific field (groupConcatFilter)

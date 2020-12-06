@@ -1,83 +1,118 @@
+#!/usr/bin/python3
+# Copyright Andrea Di Iorio 2020
+# This file is part of FFmpegFastTrimConcat
+# FFmpegFastTrimConcat is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# FFmpegFastTrimConcat is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with FFmpegFastTrimConcat.  If not, see <http://www.gnu.org/licenses/>.
+
+"""
+Configuration module,
+static configuration decladerd as global var UPERCASE_NAMED
+dyn configuration handled by a dict 
+setted with vars in environ with the same name as key
+"""
+
 from os import environ as env
 
+CONF=dict()   #ENVIRON CONFIGURATION VARNAME -> CONFIGURED VAL
+def envConfig(cfg,varName,dflt=None,boolSet=False):
+    """ set in the dict cfg env[varName], if boolSet, convert to bool env value
+        return  written value to varName
+    """
+    val=dflt
+    if varName in env:
+        val=env[varName]
+        #cast value if is int or float
+        if val.isdigit(): val=int(val)
+        elif val.replace(".","").isdigit: val=float(val)
+        if boolSet:
+            val=True
+            if "F" in val.upper(): val=False
 
-### DUMP
-DUMP_ITEMS_FOUNDED=True                 #export
-USE_DUMP_ITEMS_FOUNDED = True
+    #finally set the val [casted]
+    cfg[varName]=val
+    if "AUDIT_ENV_SET" in cfg and cfg["AUDIT_ENV_SET"]==True: print("CONF[",varName,"]:",val,"\tDeflt:",val==dflt,sep="")
+    return val
+
+##AUDIT
+envConfig(CONF,"AUDIT_ENV_SET",True)
+envConfig(CONF,"AUDIT_VIDINFO",True)
+envConfig(CONF,"AUDIT_DSCPRINT",True)
+envConfig(CONF,"AUDIT_MISSERR",True)
+envConfig(CONF,"DEBUG",False)
+envConfig(CONF,"QUIET",False)
+if CONF["QUIET"]: #disable audits
+    CONF["AUDIT_DSCPRINT"],CONF["AUDIT_MISSERR"],CONF["AUDIT_VIDINFO"]=False,False,False
+    CONF["DEBUG"]=False
+
+
+### DUMP - BACKUP
+envConfig(CONF,"DUMP_ITEMS_FOUNDED",True)
 ITEMS_LAST_FOUND="/tmp/lastItems.json"
+TMP_SEL_FILE="/tmp/selection.tmp.list.json" #backup loc. IterativeTrimSelection at each select
+SELECTION_LOGFILE="/tmp/selection"  #GUI selection file
+
 JSON_INDENT=1	#json serialization file indentation
 
-### INTERNAL CONFIGURATION PARAMS
-# vid files handled extensions
+### INTERNAL CONFIGURATION
 GIF_TUMBRL_EXTENSION = "gif"
 IMG_TUMBRL_EXTENSION = "jpg"
-VIDEO_MULTIMEDIA_EXTENSION = ["mp4", "wmw"] #TODO NameIdFirstDot ?
+VIDEO_MULTIMEDIA_EXTENSION = ["mp4", "wmw"]
 METADATA_EXTENSION = "json"
 
-##items scan
-SAVE_GENERATED_METADATA=True #save newly generated vids metadata
-if env.get("SAVE_GENERATED_METADATA") != None and "F" in env.get("SAVE_GENERATED_METADATA").upper():SAVE_GENERATED_METADATA=False
-# pool workers
-POOL_TRESHOLD = 100
-if "POOL_TRESHOLD" in env: POOL_TRESHOLD = int(env["POOL_TRESHOLD"])
-POOL_SIZE = 8
-if "POOL_SIZE" in env: POOL_SIZE = int(env["POOL_SIZE"])
+REGEX_VID_SEGMENT=".*\.mp4\.[0-9]+\.mp4"
+TMP_FULLVID_PATH_CUTS="/tmp/NO_FULLVIDEO.mp4"
 
-# var
-MIN_GROUP_DUR=196
-if "MIN_GROUP_DUR" in env: MIN_GROUP_DUR= int(env["MIN_GROUP_DUR"])
-MIN_GROUP_LEN=6
-if "MIN_GROUP_LEN" in env: MIN_GROUP_LEN= int(env["MIN_GROUP_LEN"])
-PLAY_CMD=" vlc " #" mpv --hwdec=auto "
+##SCAN FOR VIDS
+envConfig(CONF,"SAVE_GENERATED_METADATA",True) #save newly generated vids metadata
+THRESHOLD_L_TO_HMAP=222 #thresh to convert a list to a dict in FilterItems(keepNIDS=WHITELIST_NAMEID)
+envConfig(CONF,"OVERWR_FIELDS_NEMPTY",True) #merging items list:a,b, overwrite with a<-b with every nn epty field
+#filtering
+envConfig(CONF,"MIN_GROUP_DUR",6)
+envConfig(CONF,"MIN_GROUP_LEN",6)
+# pool workers
+envConfig(CONF,"POOL_TRESHOLD",8)
+envConfig(CONF,"POOL_SIZE",8)
+
+##Trim
 RADIUS_DFLT=1.596
 
 
-##AUDIT
-AUDIT_VIDINFO=True #__str__ , 
-if "AUDIT_VIDINFO" in env and "F" in env["AUDIT_VIDINFO"].upper(): AUDIT_VIDINFO=False
-AUDIT_DSCPRINT=False      #various print
-if "AUDIT_DSCPRINT" in env and "T" in env["AUDIT_DSCPRINT"].upper(): AUDIT_DSCPRINT=True
-AUDIT_MISSERR=True
-if "AUDIT_MISSERR" in env and "F" in env["AUDIT_MISSERR"].upper():AUDIT_MISSERR=False
-QUIET=False
-if QUIET or "QUIET" in env and "F" in env["QUIET"].upper(): #disable audits
-    QUIET,AUDIT_DSCPRINT,AUDIT_MISSERR,AUDIT_VIDINFO=True,False,False,False
-    DEBUG=False
-DEBUG=False
-if "DEBUG" in env and "T" in env["DEBUG"].upper(): DEBUG=True
-TMP_SEL_FILE="/tmp/selection.tmp.list.json" #backup loc. IterativeTrimSelection at each select
-
-
 ### GUI
-DISABLE_GUI = False
-SELECTION_LOGFILE="/tmp/selection"  #GUI selection file
-if "DISABLE_GUI" in env and "T" in env["DISABLE_GUI"].upper(): DISABLE_GUI = True
+envConfig(CONF,"DISABLE_GUI",False)
 BTN_SELECTED_THICKNESS=7
 BTN_NN_SELECTED_THICKNESS=1
-GUI_COLSIZE=5
-if "GUI_COLSIZE" in env: GUI_COLSIZE=int(env["GUI_COLSIZE"])
+envConfig(CONF,"GUI_COLSIZE",5)
 GUI_ITEMS_LIMIT = 250   #tkinter's own limit on how mutch obj to display ...
 THRESHOLD_KEY_PRINT=250  #max chars to show in a button
+PLAY_SEG_FIRST=True #if founded segments avail, play them before the full vid, otherwise just play the full vid
+
 #ITEMS'GRIDDED FRAME
 SEG_TRIM_ENTRY_WIDTH=120
 CANV_W,CANV_H=1900,1000
-SCROLLBAR_W=18    
-if "SCROLLBAR_W" in env: SCROLLBAR_W=int(env["SCROLLBAR_W"])
+envConfig(CONF,"SCROLLBAR_W",18)
 font = ("Arial", 15, "bold") #btn text font
 #gif
 MAX_FRAME_N=20
-GIF_UPDATE_POLL=46
+envConfig(CONF,"GIF_UPDATE_POLL",96)
 DRAW_GIF=True   #if False, display just the tumbnails jpg if any
-NameIdFirstDot = True# IF TRUE the nameID will be extracted from a path name up to the first founded dot
-if env.get("NameIdFirstDot") != None and "F" in env["NameIdFirstDot"].upper(): NameIdFirstDot = False
-
+envConfig(CONF,"NameIdFirstDot",True)#True->nameID will be extracted from a path name up to the first founded dot
+#LABELS
+DEFAULT_VID_INFOADD_STRING="ADD VID'S LABEL/INFOS"
 
 #export comma separated list of keyword to filter away items after a scan
 FilterKW=["frame","out","fake","group_","?","clips"]
 if env.get("FilterKW") != None: FilterKW=env["FilterKW"].split(",") 
-FORCE_METADATA_GEN = True  # force the generation of metadata of each founeded vid without a matching metadata file
-if env.get("FORCE_METADATA_GEN") != None and "F" in env[
-    "FORCE_METADATA_GEN"].upper(): FORCE_METADATA_GEN = False
+envConfig(CONF,"FORCE_METADATA_GEN",True)# force the gen of metadata foreach vid
 #### script configuration
 MAX_CONCAT_DUR =float("inf")    #500
 MAX_CONCAT_SIZE=float("inf")    #50 * 2 ** 20,
@@ -85,30 +120,28 @@ MAX_CONCAT_SIZE=float("inf")    #50 * 2 ** 20,
 SELECTION_FILE = "selection.list.json"
 TRIM_RM_SCRIPT = "trimReencodingless.sh"
 ### CONCAT SEGS
-CONCAT_FILELIST_FNAME,BASH_BATCH_SEGS_GEN,CONCAT_FILTER_FILE=\
-"concat.list","genSegs.sh","concat_filter_file.sh"
+CONCAT_FILELIST_FNAME="concat.list"
+BASH_BATCH_SEGS_GEN="genSegs.sh"
+CONCAT_FILTER_FILE="concat_filter_file.sh"
+PLAY_CMD=" vlc " #" mpv --hwdec=auto "
 
 
-#### GROUP KEYS--------------------------
+""" GroupKeys, group items by common vals in these [wildcardedRX] metadata keys """
 GroupKeys = ["width", "height", "sample_aspect_ratio"]
 # groupKeys=["duration"]
-# EXCLUDE KEYS-------------------------
-# excludeGroupKeys=["bit_rate","nb_frames","tags","disposition","avg_frame_rate","color","index"]
-ExcludeGroupKeys = ["duration", "bit_rate", "nb", "tag", "disposition", "has", "avg", "col", "refs", "index"]
 
+""" ExcludeGroupKeys, group items by common vals in all metadatakeys but [wildcardedRX]these keys"""
+ExcludeGroupKeys = ["duration", "bit_rate", "nb", "tag", "disposition", "has", "avg", "col", "refs", "index"]
+# excludeGroupKeys=["bit_rate","nb_frames","tags","disposition","avg_frame_rate","color","index"]
 
 PATH_SEP = ":"
 FFmpegNvidiaAwareDecode = " -vsync 0 -hwaccel cuvid -c:v h264_cuvid "
-FFmpegNvidiaAwareEncode = " -c:v h264_nvenc "
-FFmpegNvidiaAwareEncode += " -preset fast -coder vlc "
+FFmpegNvidiaAwareEncode = " -c:v h264_nvenc -preset fast -coder vlc "
 FFmpegDbg = " -hide_banner -y -loglevel 'error' "
 FFmpegNvidiaAwareBuildPath = "/home/andysnake/ffmpeg/bin/nv/ffmpeg_g " + FFmpegDbg
 FFmpegBasePath = "~/ffmpeg/bin/ffmpeg "
 
 FFMPEG = FFmpegNvidiaAwareBuildPath
-### Env override config
+#TODO REMOVE
 Encode = FFmpegNvidiaAwareEncode
 Decode = FFmpegNvidiaAwareDecode
-if env.get("ENCODE") != None: Encode = env("ENCODE")
-if env.get("DECODE") != None: Decode = env("DECODE")
-if env.get("FFMPEG") != None: FFMPEG = env("FFMPEG")

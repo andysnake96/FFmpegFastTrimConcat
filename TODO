@@ -1,7 +1,12 @@
-ora ci sono 2 serializzazioni:	obj <->json mediante __dict__
-				GUI obj->tupleList->json 
-meglio migrare alla prima, con supporto a estensione selezione.
-	e.g.: parto da scansione, sovrascrivo elementi GIA PRESENTI(del obsoleti) con prev dump
+#TOP
+-button hidden re grid()
+-test GUI with whole new functionalities + debug
 
-concat.list + time cuts  in concat demuxer syntax --> Hope reverse ! :) XD
-README.md
+#nn essenziali
+-move to MMSys dump items scanned logic     wrapper semplici
+    TEST: collection move path, scannedDump(con cuts embedded) reupdate
+
+#perfezionamenti utili ma ora nn utili
+-concat.list + time cuts  in concat demuxer syntax --> Hope reverse ! :) XD
+-doc convergence
+-README.md

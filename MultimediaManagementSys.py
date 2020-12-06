@@ -25,7 +25,7 @@ it's supported to store/get metadata as a json list of dict with infos per multi
     also supported run time generation of metadata for a given video with subprocess.run method
 
 Main Exported Function:
-GetItems                ->      recursive search from a start dir, files relative to Vid items
+ScanItems                ->      recursive search from a start dir, files relative to Vid items
 GetGroups               ->      gruop Vids, with a groupping function
 TrimSegmentsIterative   ->      play items and prompt for selection and segmentation 
 ________________________________________________________________________________________________________________________
@@ -38,8 +38,9 @@ POOL_TRESHOLD    [15] min jobs num to invoke pool map in place of standard map t
 POOL_SIZE        worker pool size
 FORCE_METADATA_GEN  (dflt True) force metadata generation for items
 """
-from configuration import  *
+
 from grouppingFunctions import *
+from configuration import *
 from scriptGenerator import GenTrimReencodinglessScriptFFmpeg
 from utils import * #concurrentPoolProcess, parseMultimedialStreamsMetadata,ffprobeMetadataGen, parseTimeOffset,vidItemsSorter
 
@@ -50,39 +51,44 @@ from subprocess import run,Popen,DEVNULL
 from argparse import ArgumentParser
 from json import loads, dumps, dump
 from time import perf_counter
+from re import search
 
 attributes = ["nameID","pathName", "sizeB", "gifPath","imgPath","metadataPath",\
-     "metadata","duration", "extension","cutPoints","trimCmds"]
+     "metadata","duration", "extension","cutPoints","trimCmds","segPaths","info","date"]
 VidTuple = namedtuple("Vid", attributes)
 
 class Vid:
     """Video items attributes plus useful operation on an item"""
     def __init__(self, multimediaNameK):
         self.nameID = multimediaNameK  # AS UNIQUE ID -> MULTIMEDIA NAME (no path and no suffix)
-        #default init of other fields
+        #basic metadata for a video
         self.pathName = None
         self.sizeB = 0
         self.gifPath = None
         self.imgPath = None
         self.metadataPath = None
-        self.metadata =None #list of vid's strams metadata (ffprobe output)
-        self.duration = 0  # num of secs for the duration
+        self.metadata =None #list of vid's streams metadata (ffprobe)
+        self.duration = 0   #in secs
         self.extension = None
-        
+        #trimSeg informations
         self.cutPoints = list() #cut times for segments generation [[start,end],...] 
         self.trimCmds  = list() #cmds to gen cutPoints (just for quick segs backup)
+        self.segPaths  = list() #vid's segment trimmed file paths as .mp4.SEGMENT_NUM.mp4
+        #var additional
+        self.info=[""]  #additional infos - label like
+        self.date=None  #vid file last access date TODO UNBINDED
 
     def __str__(self):
         outS="Item: id:"+self.nameID+" path: " + truncString(self.pathName) + \
             "size: " + str(self.sizeB) + " imgPath: " + truncString(self.imgPath)
         if self.gifPath!=None: outS+=" gifPath: "+truncString(self.gifPath)
-        if not AUDIT_VIDINFO: outS="Item: "+ self.nameID
+        if not CONF["AUDIT_VIDINFO"]: outS="Item: "+ self.nameID
         return outS
 
     def genMetadata(self):
         assert self.pathName!=None,"missing vid to gen metadata"
         self.sizeB,self.metadata,self.duration,metadataFull=ffprobeMetadataGen(self.pathName)
-        if SAVE_GENERATED_METADATA: self.saveFullMetadata(metadataFull)
+        if CONF["SAVE_GENERATED_METADATA"]: self.saveFullMetadata(metadataFull)
         else:                       return metadataFull
 
 
@@ -108,15 +114,19 @@ class Vid:
     def toTuplelist(self):
         """ save ram converting to a namedtuple the current object """
         return VidTuple(self.nameID,self.pathName,self.sizeB,self.gifPath,self.imgPath,\
-         self.metadataPath,self.metadata,self.duration,self.extension,self.cutPoints,self.trimCmds)
-        
+         self.metadataPath,self.metadata,self.duration,self.extension,self.cutPoints,self.trimCmds,self.segPaths,self.info,self.date)
+
+
+vidNamedTuple2Obj=lambda trgt: Vid().fromJson(trgt._asdict(), False)
+
+
 #support function
-def play(vid, playBaseCmd="ffplay -autoexit -fs "):
+def play(vidPath, playBaseCmd="ffplay -autoexit -fs "):
     """play the Vid with the given playBaseCmd given """
-    cmd = playBaseCmd +"'"+vid.pathName+"'"
+    cmd = playBaseCmd +"'"+vidPath+"'"
     # run(cmd.split())
     # out=Popen(cmd.split(),stderr=DEVNULL,stdout=DEVNULL)
-    print("play: ", vid.pathName,cmd)
+    print("play: ", cmd)
     #out = Popen(cmd.split(), stderr=DEVNULL, stdout=DEVNULL)
     out = system(cmd+" 1>/dev/null 2>/dev/null &\n")
 
@@ -136,7 +146,7 @@ def remove(vid, confirm=True):
     return False
 
 ### (de) serialization of Vids list
-def SerializeSelection(selectedItems, filename=None,toTuple=True):
+def SerializeSelection(selectedItems, filename=None,toTuple=True): #TODO __dict__ serialization deprecated -> so do this func
     """
         trivial serialization given @selectedItems in json 
         using namedtuple or  __dict__ ( accordingly to @toTuple)
@@ -153,13 +163,6 @@ def SerializeSelection(selectedItems, filename=None,toTuple=True):
     return serialization
 
 
-def _deserializeSelection(dumpFp):  #TODO DEPRECATED
-    """ deserialize json list of Vid.__dict__ into list of vid items objects"""
-    if type(deserialized[0]) == type(dict()): #TODO object old json serialization
-        out = [ Vid("").fromJson(i) for i in load(dumpFp)] #tuplelist serializ.
-    else: out=[VidTuple(*x) for x in load(dumpFp)]
-    return out
-
 def deserializeSelection(dumpFp,backupCopyPath="/tmp/selectionBackup.json"):
     """ deserialize json list vid itemas as namedtuple 
 		if backupCopyPath != None: save a copy of dumpFp to backupCopyPath
@@ -170,20 +173,46 @@ def deserializeSelection(dumpFp,backupCopyPath="/tmp/selectionBackup.json"):
     if backupCopyPath: open(backupCopyPath,"w").write(serializedStr)
     return out
 
-def updateCutpointsFromSerialization(items,itemsDumped):
-    """update cutPoints fields of Vid in @items list 
+
+def updateCutpointsFromSerialization(items,itemsDumped,overWrFieldsNNEmpty=CONF["OVERWR_FIELDS_NEMPTY"]):
+    """update trimSegments fields of Vids in @items  list
        with the ones in items in @itemsDumped list if they have a common nameId field
+       if @overWrFieldsNNEmpty overwrite fields of items in @items 
+        with all fields !None in the corresponding matching items in @itemsDumped
+
+       compatible with normal Vid object or namedtuple version (same fields) 
+        in both @items and @itemsDumped
 	"""
     it = { items[i].nameID:i for i in range(len(items)) }
     for i in itemsDumped: 
         #update items matching nameid with corresponding dumped ones
         if i.nameID in it:  
                 target=items[it[i.nameID]]
-                target.cutPoints=i.cutPoints
-                target.trimCmds=i.trimCmds
+                #recognize readonly namedtuple in both target and matching one
+                target_isTuple,matching_isTuple=isNamedtuple(target),isNamedtuple(i)
+                #set trim infos in the same list obj (compatible with namedtuple)
+                target.cutPoints.clear();target.cutPoints.extend(i.cutPoints)
+                target.trimCmds.clear();target.trimCmds.extend(i.trimCmds)
+                
+                if overWrFieldsNNEmpty: #set other fields not empty
+                    #get fields to replace 
+                    fieldsNNEmpty=list() #fields to replace in target (name,newVal) 
+                    if matching_isTuple:
+                        fieldsNNEmpty=[x for x in i._asdict().items() if nnEmpty(x[1])]
+                    else:   #normal object
+                        fieldsNNEmpty=[x for x in vars(i).items() if nnEmpty(x[1])]
+
+                    if target_isTuple:    target=vidNamedTuple2Obj(target) #create a target tmp copy writable
+                    #replace fields
+                    for x in fieldsNNEmpty: setattr(target,x[0],x[1])
+                    if CONF["AUDIT_DSCPRINT"]: print("overwritten extra fields on",target.nameID,":",fieldsNNEmpty)
+                    if target_isTuple:   #reset target as a namedtuple (better perf )
+                        target=target.toTuplelist()
+                        items[it[i.nameID]]=target 
+                
 
 ### Vid Item gather from filesystem
-def extractExtension(filename, PATH_ID,nameIdFirstDot=NameIdFirstDot):
+def extractExtension(filename, PATH_ID,nameIdFirstDot=CONF["NameIdFirstDot"]):
     """
     extract the extension and nameID from filename
     @param filename: filepath 
@@ -228,24 +257,24 @@ def genMetadata(vidItems):
     metadataFilesQueue = [i for i in itemsList if i.metadata == None and i.pathName != None]
     metadataFilesPathQueue = [i.pathName for i in metadataFilesQueue]  # src vid files path to generate metadata
     print("metadata to gen queue len:", len(metadataFilesPathQueue))
-    if len(metadataFilesQueue) > POOL_TRESHOLD:  # concurrent version
+    if len(metadataFilesQueue) > CONF["POOL_TRESHOLD"]:  # concurrent version
         processed = list(concurrentPoolProcess(metadataFilesPathQueue, ffprobeMetadataGen,\
-                "metadata build err", POOL_SIZE))
+                "metadata build err", CONF["POOL_SIZE"]))
         # manually set processed metadata fields (pool.map work on different copies of objs)
         for i in range(len(metadataFilesPathQueue)):
             item, processedMetadata = metadataFilesQueue[i], processed[i]
             if processedMetadata != None and processedMetadata[1] != None:  # avaible at least metadata dict
                 item.sizeB, item.metadata, item.duration, metadataFull = processedMetadata
-                if SAVE_GENERATED_METADATA: item.saveFullMetadata(metadataFull)
+                if CONF["SAVE_GENERATED_METADATA"]: item.saveFullMetadata(metadataFull)
             else:
                 print("invalid metadata gen at ", item.pathName, file=stderr)
     else:  # sequential version if num of jobs is too little -> only pickle/spawn/... overhead in pool
         for item in metadataFilesQueue: item.genMetadata();
     
     end=perf_counter()
-    print("metadatas gen in:",end-start,"workPoolUsed:",len(metadataFilesQueue)>POOL_SIZE)
+    print("metadatas gen in:",end-start,"workPoolUsed:",len(metadataFilesQueue)>CONF["POOL_SIZE"])
 
-def GetItems(rootPath=".", vidItems=dict(), PATH_ID=False,forceMetadataGen=FORCE_METADATA_GEN, limit=float("inf"), \
+def ScanItems(rootPath=".", vidItems=dict(), PATH_ID=False,forceMetadataGen=CONF["FORCE_METADATA_GEN"], limit=float("inf"), \
              followlinks=True,skipKw=FilterKW):
     """
     scan for vid objs from rootPathStr recursivelly
@@ -287,15 +316,28 @@ def GetItems(rootPath=".", vidItems=dict(), PATH_ID=False,forceMetadataGen=FORCE
             elif METADATA_EXTENSION in extension:
                 item.metadataPath = fpath
             else:
-                if extension not in VIDEO_MULTIMEDIA_EXTENSION:
+                notHandledExt=True
+                for ext in VIDEO_MULTIMEDIA_EXTENSION:
+                    if ext in extension: notHandledExt=False;break
+                if notHandledExt:
                     print("not handled extension",extension,item,file=stderr)
                     continue
+                
                 if item.pathName != None: 
                     print("already founded a vid with same nameID",item.nameID,item.pathName,\
-                    fpath," ... overwriting field",file=stderr);doubleCounter+=1
-                if type(fpath) != type(""): raise Exception("?")
-                item.pathName = fpath
-                item.extension=extension
+                        fpath," ... overwriting pathName",file=stderr);doubleCounter+=1
+                isSegment=False
+                if search(REGEX_VID_SEGMENT,fpath) == None: #normal vid
+                    item.pathName = fpath
+                    item.extension=extension
+                else:   #segment trimmed file
+                    print(fpath)
+                    #set "fullvideo" path to a tmp fake path, to avoid later filtering
+                    if item.pathName==None: item.pathName=TMP_FULLVID_PATH_CUTS
+                    if lastPartPath(fpath) in [lastPartPath(f) for f in item.segPaths]:
+                        print("segment",fpath," already included...",item.segPaths)
+                        continue
+                    item.segPaths.append(fpath)
 
             if len(vidItems) == limit:  print("reached", limit, "vid items ... breaking the recursive search");break
     missingPath= [i for i in vidItems.values() if i.pathName==None ]
@@ -304,10 +346,10 @@ def GetItems(rootPath=".", vidItems=dict(), PATH_ID=False,forceMetadataGen=FORCE
     print("double nameID founded: ",doubleCounter,"tot num of items founded:",len(vidItems))
     print("metadata file to read queue len:",len(metadataFilesQueue))
     startRdMetadata=perf_counter()
-    if len(metadataFilesQueue) > POOL_TRESHOLD:
+    if len(metadataFilesQueue) > CONF["POOL_TRESHOLD"]:
         # concurrent metadata files parse in order
         metadataFilesPathQueue = [i.metadataPath for i in metadataFilesQueue]
-        processed = list(concurrentPoolProcess(metadataFilesPathQueue, parseMultimedialStreamsMetadata,"badJsonFormat",POOL_SIZE ))
+        processed = list(concurrentPoolProcess(metadataFilesPathQueue, parseMultimedialStreamsMetadata,"badJsonFormat",CONF["POOL_SIZE"] ))
         for i in range(len(metadataFilesQueue)):
             metadata, item = processed[i], metadataFilesQueue[i]
             if metadata == None or metadata[1]==None:
@@ -336,7 +378,7 @@ def GetGroups(srcItems=None, grouppingRule=ffmpegConcatDemuxerGroupping,startSea
     @return: items groupped in a dict: groupKey->list of vid items
     """
     groups = dict()  # groupKey->itemList
-    if srcItems == None:  srcItems = list(GetItems(startSearch).values())
+    if srcItems == None:  srcItems = list(ScanItems(startSearch).values())
     for item in FilterItems(srcItems,tumbnailPresent=filterTumbnail,gifPresent=filterGif):
         try:  # add item to the group it belongs to
             itemKeyGroup = grouppingRule(item)
@@ -367,7 +409,7 @@ def FilterGroups(groups, minSize, mode="len"):
         if mode=="both":    keepGroup=keepGroupDur and keepGroupLen
 
         if keepGroup:        filteredGroup[groupK]=items
-        elif AUDIT_DSCPRINT:  print("filtered group\tlen:",len(items),"dur:",gDur,file=stderr)
+        elif CONF["AUDIT_DSCPRINT"]:  print("filtered group\tlen:",len(items),"dur:",gDur,file=stderr)
     return filteredGroup
 
 def selectGroupTextMode(groups,joinGroupItems=True):
@@ -394,8 +436,7 @@ def selectGroupTextMode(groups,joinGroupItems=True):
     out = list()
     #select
     while len(out)==0:
-        selectedGroupIDs = input("ENTER EITHER GROUPS NUMBER SPACE SEPARATED,\
-             ALL for all groups\t ")
+        selectedGroupIDs = input("ENTER EITHER GROUPS NUMBER SPACE SEPARATED,ALL for all groups\t ")
         if "ALL" in selectedGroupIDs.upper(): out = groupVals
         else:
             for gid in selectedGroupIDs.split():
@@ -404,8 +445,11 @@ def selectGroupTextMode(groups,joinGroupItems=True):
     print("selected items: ",len(out))
     return out
 
+#convert pathnames list to nameID list
+pathsToNameIDlist=lambda paths: [extractExtension(p)[1] for p in paths]
+    
 def FilterItems(items, pathPresent=True,tumbnailPresent=False,gifPresent=False,\
-         metadataPresent=True,durationPos=True,filterKW=FilterKW):
+         metadataPresent=True,durationPos=True,filterKW=FilterKW,keepNIDS=list()):
     """
     filter items by the optional flags passed
     @items: source items list
@@ -413,15 +457,31 @@ def FilterItems(items, pathPresent=True,tumbnailPresent=False,gifPresent=False,\
     @tumbnailPresent:  filter away items without tumbnail img path set
     @metadataPresent:  filter away items without metadata dict set
     @filterKW:  list of keywords to match to item.pathName to discard vids
+    @keepNIDS:  white list of acceptable nameID of the items to keep
+                if empty keep al items not filter with the rest of the logic
     @return: filtered items in a new list
     """
     outList = list()
+    if len(keepNIDS)>THRESHOLD_L_TO_HMAP: keepNIDS={ k:0 for k in keepNIDS}
     for i in items:
         keep=       (not pathPresent or i.pathName != None) \
                 and (not tumbnailPresent or i.imgPath !=None) \
                 and (not gifPresent or i.gifPath !=None) \
                 and (not metadataPresent or i.metadata !=None)\
                 and (not durationPos or i.duration>0)
+        #audit missing fields for manual operations
+        if CONF["AUDIT_MISSERR"] or (not CONF["QUIET"] and not keep):
+            if i.pathName == None:print("missing pathName at",i,file=stderr);continue
+            if i.imgPath == None and i.gifPath == None: #if at least one of them is fine
+                if i.imgPath == None : print("Missing thumbnail at \t", i.pathName,file=stderr)
+                if i.gifPath == None:  print("Missing gif at \t", i.pathName,file=stderr)
+            if i.metadata==None:  print("None metadata", i.metadataPath, file=stderr)
+            elif i.duration <= 0 and i.metadataPath != None:
+                print("invalid duration", i.duration, i.metadataPath, file=stderr)
+
+        if len(keepNIDS)>0 and i.nameID not in keepNIDS:
+            print("filtered ",i,"not in nameID s whitelist")
+            keep=False;continue
 
         for kw in filterKW:
             if not keep or kw in i.pathName:
@@ -431,18 +491,16 @@ def FilterItems(items, pathPresent=True,tumbnailPresent=False,gifPresent=False,\
                 break
         if keep:    outList.append(i)
 
-        if AUDIT_MISSERR or (not QUIET and not keep):
-            if i.pathName == None:print("missing pathName at",i,file=stderr);continue
-            if i.imgPath == None and i.gifPath == None: #if at least one of them is fine
-                if i.imgPath == None : print("Missing thumbnail at \t", i.pathName,file=stderr)
-                if i.gifPath == None:  print("Missing gif at \t", i.pathName,file=stderr)
-            if i.metadata==None:  print("None metadata", i.metadataPath, file=stderr)
-            elif i.duration <= 0 and i.metadataPath != None:
-                print("invalid duration", i.duration, i.metadataPath, file=stderr)
     
     filtered=len(items)-len(outList)
     if filtered>0: print("filtered:",filtered,"items")
     return outList
+
+#filter items with nameid contained in a pathname in nameListFilterFile
+ItemsNamelistRestrict=lambda itemsList,nameListFilterFile: \
+    FilterItems(itemsList,\
+    keepNIDS=pathsToNameIDlist(open(nameListFilterFile).readlines())) 
+
 ######
 ### iterative play trim - selection of items support
 def _printCutPoints(cutPoints):  # print cutPoints as string vaild for  TrimSegmentsIterative
@@ -528,6 +586,9 @@ def trimSegCommand(vid,cmd,start=0,end=None,newCmdOnErr=True,overwriteCutPoints=
     print("selected these cutpoints:",segmentationPoints,"with cmd:\t"+cmd,sep="\n")
     return segmentationPoints
 
+
+def appendVidInfoStr(item,infoStr): item.info[0] += infoStr
+
 def TrimSegmentsIterative(itemsList, skipNameList=None, dfltStartPoint=0, dfltEndPoint=None, overwriteCutPoints=True):
     """
     iterativelly play each Vid items and prompt for  select/replay video or trim in segments by specifing cut times
@@ -555,7 +616,7 @@ def TrimSegmentsIterative(itemsList, skipNameList=None, dfltStartPoint=0, dfltEn
             print("curr cutPoints:\t", _printCutPoints(item.cutPoints))
             #drawSegmentsTurtle([item]) #TODO turtle.Terminator
         
-        play(item,PLAY_CMD)
+        play(item.pathName ,PLAY_CMD)
         # Prompt String
         cmd = input("Add Vid "+item.nameID+" dur " +str(item.duration/60) + "min, size "+\
                 str(item.sizeB/2**20)+"MB"+ trimSelectionPrompt)
@@ -565,7 +626,8 @@ def TrimSegmentsIterative(itemsList, skipNameList=None, dfltStartPoint=0, dfltEn
         if "DEL" in cmd.upper():                remove(item); continue
 
         trimSegCommand(item,cmd,dfltStartPoint,end,overwriteCutPoints=overwriteCutPoints)
-
+        info=input("addition infos to add [dflt=""]\t")
+        appendVidInfoStr(item,info)
         selection.append(item)
         #write selection to a tmp file with selected items json serialized to not lost partial selection
         tmpSelectionBackup.seek(0)
@@ -599,7 +661,7 @@ def argParseMinimal(args):
     parser.add_argument("--videoTrimSelectionOutput", type=int, default=2, choices=[0, 1, 2],
                         help="output mode of ITERATIVE_TRIM_SELECT mode: 0 (dflt) json serialization of selected file with embeddd cut points, 1 bash ffmpeg trim script with -ss -to -c: copy -avoid_negative_ts (commented rm source files lines ), 2 both")
 
-    parser.add_argument("--selectionMode", type=str, default="GROUP", choices=["ALL", "GROUP"],
+    parser.add_argument("--selectionMode", type=str, default="ALL", choices=["ALL", "GROUP"],
                         help="how to select the items for ITERATIVE_TRIM_SELECT,either  ALL (all vids founded taken), GROUP (dflt selected vids in groups obtained with grouppingRule opt)")
     parser.add_argument("--grouppingRule", type=str, default=ffmpegConcatDemuxerGroupping.__name__,choices=list(GrouppingFunctions.keys()), help="groupping mode of items")
     parser.add_argument("--groupFiltering", type=str, default="both",choices=["len","dur","both"],help="filtering mode of groupped items: below len or duration threshold the group will be filtered away")
@@ -615,43 +677,44 @@ def argParseMinimal(args):
     return nsArgParsed
 
 if __name__ == "__main__":
-    nsArgParsed = argParseMinimal(argv[1:])
-    skipSelection=nsArgParsed.videoTrimOldSelectionFileAction=="REVISION" or nsArgParsed.operativeMode=="CONVERT_SELECTION_FILE_TRIM_SCRIPT"
+    args = argParseMinimal(argv[1:])
+    skipSelection= args.videoTrimOldSelectionFileAction == "REVISION" or args.operativeMode == "CONVERT_SELECTION_FILE_TRIM_SCRIPT"
+    items = list()
     if not skipSelection:
-        items = list(GetItems(nsArgParsed.pathStart).values())
-        items=FilterItems(items)
-
-        if nsArgParsed.selectionMode == "GROUP":
-            groups = GetGroups(items, grouppingRule=nsArgParsed.grouppingRule)
+        if args.selectionMode == "ALL":
+            items = list(ScanItems(args.pathStart).values())
+            items=FilterItems(items)
+        elif args.selectionMode == "GROUP":
+            groups = GetGroups(items, grouppingRule=args.grouppingRule)
             #filter groups
-            minSize=MIN_GROUP_LEN
-            if nsArgParsed.groupFiltering == "dur": minSize=MIN_GROUP_DUR
-            groups=FilterGroups(groups,minSize,nsArgParsed.groupFiltering)
-
-    elif nsArgParsed.operativeMode=="ITERATIVE_TRIM_SELECT":
+            minSize=CONF["MIN_GROUP_LEN"]
+            if args.groupFiltering == "dur": minSize=CONF["MIN_GROUP_DUR"]
+            groups=FilterGroups(groups, minSize, args.groupFiltering)
+            for x in groups.values():
+                for y in x: items.append(x)
+    if args.operativeMode== "ITERATIVE_TRIM_SELECT":
         # recoverSelectionOld
         oldSelection,skipOldNames = list(),None
-        if nsArgParsed.videoTrimOldSelectionFile != None:  # extend current new selection with the old one
-            oldSelection = deserializeSelection(open(nsArgParsed.videoTrimOldSelectionFile).read())
-            if nsArgParsed.videoTrimOldSelectionFileAction=="REVISION": items=oldSelection
-            elif nsArgParsed.videoTrimOldSelectionFileAction=="SKIP": skipOldNames = [item.pathName for item in oldSelection]
-            elif nsArgParsed.videoTrimOldSelectionFileAction=="MERGE": items+=oldSelection
+        if args.videoTrimOldSelectionFile != None:  # extend current new selection with the old one
+            oldSelection = deserializeSelection(open(args.videoTrimOldSelectionFile).read())
+            if args.videoTrimOldSelectionFileAction == "REVISION": items=oldSelection
+            elif args.videoTrimOldSelectionFileAction == "SKIP": skipOldNames = [item.pathName for item in oldSelection]
+            elif args.videoTrimOldSelectionFileAction == "MERGE": items+=oldSelection
 
-        if nsArgParsed.selectionMode == "GROUP" and not skipSelection :
-            if not DISABLE_GUI:items = guiMinimalStartGroupsMode(trgtAction=SelectWholeGroup, groupsStart=groups)
-            else:items = selectGroupTextMode(groups)
-        if nsArgParsed.itemsSorting != None:  vidItemsSorter(items,nsArgParsed.itemsSorting)
+        if args.selectionMode == "GROUP" and not skipSelection :
+            items = selectGroupTextMode(groups) #guiMinimalStartGroupsMode(trgtAction=SelectWholeGroup, groupsStart=groups)
+        if args.itemsSorting != None:  vidItemsSorter(items, args.itemsSorting)
 
         selected, skipped = TrimSegmentsIterative(items, skipNameList=skipOldNames,
-                                                  dfltStartPoint=nsArgParsed.videoTrimSelectionStartTime,
-                                                  dfltEndPoint=nsArgParsed.videoTrimSelectionEndTime)
+                                                  dfltStartPoint=args.videoTrimSelectionStartTime,
+                                                  dfltEndPoint=args.videoTrimSelectionEndTime)
         print("selected: ", selected, "num", len(selected))
         selected.extend(oldSelection)
         # output selection
-        logging = nsArgParsed.videoTrimSelectionOutput
+        logging = args.videoTrimSelectionOutput
         if logging == 0 or logging == 2: SerializeSelection(selected, SELECTION_FILE)
-        if logging == 1 or logging == 2: GenTrimReencodinglessScriptFFmpeg(selected, outFname=TRIM_RM_SCRIPT,dstCutDir=nsArgParsed.dstCutDir)
-    elif nsArgParsed.operativeMode == "CONVERT_SELECTION_FILE_TRIM_SCRIPT":
-        oldSelection = deserializeSelection(open(nsArgParsed.videoTrimOldSelectionFile).read())
+        if logging == 1 or logging == 2: GenTrimReencodinglessScriptFFmpeg(selected, outFname=TRIM_RM_SCRIPT, dstCutDir=args.dstCutDir)
+    elif args.operativeMode == "CONVERT_SELECTION_FILE_TRIM_SCRIPT":
+        oldSelection = deserializeSelection(open(args.videoTrimOldSelectionFile).read())
         GenTrimReencodinglessScriptFFmpeg(oldSelection, outFname=TRIM_RM_SCRIPT)
     else:   raise Exception("BAD OPERATIVE MODE")

@@ -7,15 +7,7 @@ from random import shuffle
 from sys import stderr
 
 
-def to_tuple(lst):
-    """convert the given list to a tuple recursivelly"""""
-    for r in range(len(lst)):
-        i=lst[r]
-        if isinstance(i,list):      lst[r]= to_tuple(i)
-        elif isinstance(i,tuple):   lst[r]= to_tuple(list(i))
-        elif isinstance(i,dict):    lst[r]=tuple(i.items())
-    return tuple(lst)
-
+##probe helper
 def ffprobeMetadataGen(vidPath, FFprobeJsonCmd="ffprobe -v quiet -print_format json -show_format -show_streams -show_error"):
     """generate metadata for item  at given path with subprocess.run
         @return: vid size, streams'metadata dictionaries (with vid stream at 0th pos), vid duration in secods (float), metdata generated frmo ffprobe
@@ -24,7 +16,7 @@ def ffprobeMetadataGen(vidPath, FFprobeJsonCmd="ffprobe -v quiet -print_format j
     out = run(FFprobeJsonCmdSplitted, capture_output=True)
     metadataFull = loads(out.stdout.decode())
     if metadataFull.get("error")!=None and ["error"]!=None and len(metadataFull)==1: 
-        print("error at ",vidPath,file=stderr);return None,None,None,None
+        print("error at ",vidPath,metadataFull ,file=stderr);return None,None,None,None
     return (*extractMetadataFFprobeJson(metadataFull),metadataFull)     #python3 required
 
 
@@ -59,7 +51,7 @@ def parseMultimedialStreamsMetadata(fname):
     fileMetadata.close()
     return extractMetadataFFprobeJson(metadata)
 
-
+##ffmpeg's time spec conversion
 def parseTimeOffset(timeStr, convertToSec=False):
     """
     parse time specification string (valid for ffmpeg), validating it, eventually converting it to seconds
@@ -189,14 +181,12 @@ def vidItemsSorter(itemsSrc, sortMethod):
         itemsSrc.sort(key=lambda x: int(x.sizeB), reverse=True)
     elif sortMethod == "sizeName":
         itemsSrc.sort(key=lambda x: (x.nameID, int(x.sizeB)), reverse=True)
-    elif sortMethod == "nameID":
-        itemsSrc.sort(key=lambda x: x.nameID)
-    elif sortMethod == "shuffle":
-        shuffle(itemsSrc)
-    else:
-        raise Exception("not founded sorting method")
 
+    elif sortMethod == "nameID": itemsSrc.sort(key=lambda x: x.nameID)
+    elif sortMethod == "shuffle":shuffle(itemsSrc)
+    else:raise Exception("not founded sorting method")
 
+##support var
 def cleanPathname(name, disableExtensionForce=False, extensionTarget=".mp4"):
     #clean pathName return it like 'XXXXX.extensionTarget'
     if len(name)<3: return
@@ -205,6 +195,25 @@ def cleanPathname(name, disableExtensionForce=False, extensionTarget=".mp4"):
     if not disableExtensionForce and extensionTarget not in name:
         name=name[:-1]+extensionTarget+"'"
     return name
+
+lastPartPath=lambda fpath: fpath.split("/")[-1]
+
+def to_tuple(lst):
+    """convert the given list to a tuple recursivelly"""""
+    for r in range(len(lst)):
+        i=lst[r]
+        if isinstance(i,list):      lst[r]= to_tuple(i)
+        elif isinstance(i,tuple):   lst[r]= to_tuple(list(i))
+        elif isinstance(i,dict):    lst[r]=tuple(i.items())
+    return tuple(lst)
+
+nnEmpty=lambda field: field!=None or field!=0
+def isNamedtuple(obj): #check if obj is a std object using vars() builtin
+    isTuple=False
+    try:    vars(obj)
+    except: isTuple=True
+    return isTuple
+
 
 if __name__=="__main__":
     ## FULL COVERAGE AUTO FUNCS CALL

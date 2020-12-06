@@ -18,10 +18,11 @@
 from MultimediaManagementSys import *
 from grouppingFunctions import sizeBatching
 from utils import printList
-from configuration import MAX_FRAME_N,SCROLLBAR_W,SEG_TRIM_ENTRY_WIDTH,JSON_INDENT
+from configuration import *
 from scriptGenerator import GenTrimReencodinglessScriptFFmpeg
 
 import tkinter as tk
+import tkinter.ttk as ttk
 from tkinter import messagebox
 from PIL import ImageTk, Image
 from builtins import tuple
@@ -64,12 +65,17 @@ def _select(selected):
     """
     global SelectedList,btns
     #operative mode selection modifiers
-    global PlayMode, SegSelectionMode, SegSelectionTimes, RemoveModeEnable, DeleteGroupKeepOne
+    global PlayMode, SegSelectionMode, SegSelectionTimes,InfoAdd, RemoveModeEnable, DeleteGroupKeepOne
 
     button=btns[selected.nameID]
     print("selected\t:",selected,"current tot selection:",len(SelectedList))
 
-    if PlayMode.get(): return play(selected,"vlc -f ")
+    if PlayMode.get(): 
+        if PLAY_SEG_FIRST and len(selected.segPaths)>0: 
+            target=" ".join(selected.segPaths)
+            if selected.pathName!=None: target+=" "+selected.pathName #source vid if exist
+            return play(target,"vlc -f ")
+        else:   return play(selected.pathName,"vlc -f ")
 
     if RemoveModeEnable.get(): #remove the selection
         remTarget=[selected]
@@ -95,11 +101,17 @@ def _select(selected):
         if DeleteGroupKeepOne.get(): SelectedList=list()
         return
 
+    newInfo=InfoAdd.get().strip()
+    if newInfo!=DEFAULT_VID_INFOADD_STRING: 
+        appendVidInfoStr(selected,newInfo)
+        print("VID ADDITIONAL INFO:",selected.info[0])
+    
     if SegSelectionMode.get() == 1:  #add cut points to the selected item
         #times = [float(x) for x in SegSelectionTimes.get().strip().split(" ") ] #ITERATIVE_TRIM_SEL CALL LOGIC
         #selected.cutPoints.extend([times])
 
         trimPoints=trimSegCommand(selected,SegSelectionTimes.get().strip(),newCmdOnErr=False)
+
         if len(trimPoints)>0:
             SelectedList.append(selected)
             print("cut commands:",selected.trimCmds,"cut points:",selected.cutPoints,sep="\n")
@@ -133,7 +145,7 @@ def _flushSelectedItems(selected=SelectedList,logFile=SELECTION_LOGFILE):
     if logFile!=None:
         selectionLogFile=logFile+ctime().replace(" ", "_")
         f = open(selectionLogFile,"w")
-        selectionInfos="# cumulSize: "+str(cumulSize / 2**20)+" MB\n"+"\t cumulDur:"+str(cumulDur/60)+" min\n"
+        selectionInfos="# cumulSize: "+str(cumulSize / 2**20)+" MB "+"\t#cumulDur:"+str(cumulDur/60)+" min\n"
         f.write(selectionInfos)
         f.writelines(selected)
         f.close()
@@ -165,7 +177,7 @@ class VerticalScrolledFrame(tk.Frame):
         tk.Frame.__init__(self, parent, *args, **kw)
 
         # create a canvas object and a vertical scrollbar for scrolling it
-        vscrollbar = tk.Scrollbar(self, orient=tk.VERTICAL,width=SCROLLBAR_W,activebackground="green",bg="green")
+        vscrollbar = tk.Scrollbar(self, orient=tk.VERTICAL,width=CONF["SCROLLBAR_W"],activebackground="green",bg="green")
         vscrollbar.pack(fill=tk.Y, side=tk.LEFT, expand=tk.FALSE)
         canvas = tk.Canvas(self, bd=0, highlightthickness=0, width=CANV_W,height=CANV_H, yscrollcommand=vscrollbar.set)
         # canvas.configure(scrollregion=canvas.bbox("all"))
@@ -230,8 +242,8 @@ def update(gifs,root):
         g.frameIdxRef[0]=(frameIdx+1)%framesN
         g.showObj[0].configure(image=frame)
         
-        if DEBUG:   print("showObj id:",id(g.showObj[0]))
-    root.after(GIF_UPDATE_POLL, update,gifs,root)
+        if CONF["DEBUG"]:   print("showObj id:",id(g.showObj[0]))
+    root.after(CONF["GIF_UPDATE_POLL"], update,gifs,root)
 
 GifMetadTuple=namedtuple("GifMetadata","frames frameIdxRef showObj ")
 
@@ -257,10 +269,15 @@ def _getPreview(path,refObj,getGif=False):
     return PreviewTuple(refObj,img,None)
 
 
-def _nextPage(items,drawGif,root):
-    #stub to draw a page of items with global var pgN 
-    global pgN,sFrame
-    if pgN*GUI_ITEMS_LIMIT > len(items): pgN = 0  # circular next page
+def _drawPage(items,drawGif,root,decresePgN=False,pageNumber=pgN):
+    #stub to draw a page of items,
+    #actual page num in global pgN var, updated with resulting page drawed
+    global pgN,sFrame,  nextPage
+    pgN=pageNumber
+    if decresePgN: 
+        pgN-=1
+        if pgN<0: pgN=len(items)//GUI_ITEMS_LIMIT 
+    if pgN*GUI_ITEMS_LIMIT > len(items): pgN = 0
 
     #delete previous scroll frame
     #(global because this stub is linked to a btn -> woud always pass the same ref)
@@ -277,9 +294,9 @@ def _nextPage(items,drawGif,root):
 
     drawItems(items[pgN*GUI_ITEMS_LIMIT:(pgN+1)*GUI_ITEMS_LIMIT],drawGif,sFrame)
 
-    pgN += 1
-    print("nextpgNumber :", pgN,id(sFrame))
-    #nextPage.configure(text="nextPage: "+str(pgN))
+    print("drawed page Num:", pgN,id(sFrame))
+    if not decresePgN:  pgN += 1
+    nextPage.configure(text="nextPage: "+str(pgN))
 
 
 def drawItems(items,drawGif,mainFrame):
@@ -293,7 +310,7 @@ def drawItems(items,drawGif,mainFrame):
     global btns, imgs,gifs
     gifs,imgs = list(),list()
 
-    i,row, col,colSize=0,0,0,GUI_COLSIZE #aux indexes to progressivelly grid items
+    i,row, col,colSize=0,0,0,CONF["GUI_COLSIZE"]#aux indexes to progressivelly grid items
     
     start=perf_counter()
 
@@ -308,9 +325,9 @@ def drawItems(items,drawGif,mainFrame):
         prevArgs=[ (items[i].imgPath,btns[items[i].nameID]) for i in range(len(items))]
 
     start=perf_counter()
-    if len(prevArgs)>POOL_TRESHOLD and not drawGif: #multi process image parsing
+    if len(prevArgs)>CONF["POOL_TRESHOLD"] and not drawGif: #multi process image parsing
           print("worker pool concurrent image parsing")
-          processed=list(concurrentPoolProcess(prevArgs,_getPreview,"badTumbNail",POOL_SIZE))
+          processed=list(concurrentPoolProcess(prevArgs,_getPreview,"badTumbNail",CONF["POOL_SIZE"]))
     else: processed=list(map(lambda args: _getPreview(*args),prevArgs))  #serial, unpack args
     end=perf_counter()
     print("images parsing elapsed:",end-start)
@@ -331,7 +348,9 @@ def drawItems(items,drawGif,mainFrame):
             cutStr=str(item.cutPoints).replace(" ","").replace("],"," ").replace(",","-").replace("[","").replace("]","").replace("'","")
             txt += "\ncuts#="+str(len(item.cutPoints))+\
                     truncString(": "+cutStr,14,suffixPatternToShowSep=None)
-        if len(item.trimCmds)> 0:  txt+="\nbackUpCmds#="+str(len(item.trimCmds))
+        if len(item.info[0])>0:    txt+="\n"+truncString(item.info[0],suffixPatternToShowSep=None)
+        elif len(item.segPaths)> 0:  txt+="\ntrim Seg ready#="+str(len(item.segPaths))
+        #elif len(item.trimCmds)> 0:  txt+="\nbackUpCmds#="+str(len(item.trimCmds))
         
         if drawGif:
             btn.configure(command=funcTmp,text=txt, \
@@ -344,7 +363,7 @@ def drawItems(items,drawGif,mainFrame):
                 compound="center",fg="white", font=font)
             imgs.append(tumbrl) #avoid garbage collector to free the parsed imgs
 
-        if DEBUG: print("Adding:",item.nameID,"showObj id:", id(btn), row, col, i)
+        if CONF["DEBUG"]: print("Adding:",item.nameID,"showObj id:", id(btn), row, col, i)
 
         mainFrame.childs.append(btn)
         btn.grid(row=row, column=col)
@@ -361,7 +380,9 @@ def drawItems(items,drawGif,mainFrame):
         mainFrame.interior.after_idle(update,gifs,mainFrame)
 
 
-
+def _sortItems(items,sortMethod,drawGif,root,_evnt):
+    vidItemsSorter(items,sortMethod.get())
+    _drawPage(items,drawGif,root,pageNumber=0)
 
 ### GUI CORE
 def itemsGridViewStart(itemsSrc,subWindow=False,drawGif=False,sort="size"):
@@ -375,7 +396,7 @@ def itemsGridViewStart(itemsSrc,subWindow=False,drawGif=False,sort="size"):
     When tkinter root closed, Returns SelectedList of items
     """
     global nextPage, items, RemoveModeEnable
-    global PlayMode, SegSelectionMode, SegSelectionTimes, DeleteGroupKeepOne,GifsUpdate
+    global PlayMode, SegSelectionMode, SegSelectionTimes,InfoAdd, DeleteGroupKeepOne,GifsUpdate
     
     #get the gui tkinter container window for the element to grid inside
     root=None
@@ -390,7 +411,7 @@ def itemsGridViewStart(itemsSrc,subWindow=False,drawGif=False,sort="size"):
         if i.sizeB == None:
             print(i)
     assert len(items)>0,"FILTERED ALL ITEMS"
-    if DEBUG:       print("items to draw:");printList(items)
+    if CONF["DEBUG"]:       print("items to draw:");printList(items)
     #items=[i for i in itemsSrc if i!=None and i.pathName!=None and i.imgPath!=None]
     try: vidItemsSorter(items,sort)        #sort with the target method
     except Exception as e: print("sorting items fail with: ",e)
@@ -402,41 +423,62 @@ def itemsGridViewStart(itemsSrc,subWindow=False,drawGif=False,sort="size"):
     GifsUpdate=tk.BooleanVar(value=True)
     DeleteGroupKeepOne=tk.BooleanVar()
     SegSelectionMode = tk.IntVar()
-    buttonFrame = tk.Frame(root)
-    buttonFrame.grid(row=0,column=0)
-    nextPg = partial(_nextPage,items,drawGif,root)
-    nextPage = tk.Button(buttonFrame, command=nextPg, text="nextPage", background="yellow")
-    nextPage.grid(row=0, column=0)
+    containerFrame = tk.Frame(root)
+    containerFrame.grid(row=0,column=0)
 
-    flushBtn = tk.Button(buttonFrame, command=_flushSelectedItems,\
+    prevPg = partial(_drawPage,items,drawGif,root,True)
+    prevPage = tk.Button(containerFrame, command=prevPg, text="<<prevPage",\
+         background="yellow")
+    prevPage.grid(row=0,column=0)
+    nextPg = partial(_drawPage,items,drawGif,root)
+    nextPage = tk.Button(containerFrame, command=nextPg, text="nextPage>>",\
+         background="yellow")
+    nextPg = partial(_drawPage,items,drawGif,root)
+    nextPage = tk.Button(containerFrame, command=nextPg, text="nextPage",\
+         background="yellow")
+    nextPage.grid(row=0, column=1)
+
+    flushBtn = tk.Button(containerFrame, command=_flushSelectedItems,\
         text="printSelected", background="green")
-    flushBtn.grid(row=0, column=1)  #flush items selected (print + file write)
+    flushBtn.grid(row=0, column=2)  #flush items selected (print + file write)
+    #sorting
+    sortMethod=tk.StringVar(containerFrame,"size")
+    sortItems=partial(_sortItems,items,sortMethod,drawGif,root)
+    sortComboChoice=ttk.Combobox(containerFrame,textvar=sortMethod)
+    sortComboChoice.bind("<<ComboboxSelected>>", sortItems)
+    sortComboChoice["values"]=["duration","size","sizeName","nameID","shuffle"]
+    sortComboChoice.grid(row=0,column=3)
 
-    segSelectionEnable = tk.Checkbutton(buttonFrame, text="segmentSelMode",\
+    segSelectionEnable = tk.Checkbutton(containerFrame, text="segmentSelMode",\
         variable=SegSelectionMode) #TODO also flush->add: , command=_flushSelectedItems)
-    segSelectionEnable.grid(row=1, column=0)
+    segSelectionEnable.grid(row=2, column=0)
 
-    SegSelectionTimes = tk.Entry(buttonFrame,width=SEG_TRIM_ENTRY_WIDTH)
+    SegSelectionTimes = tk.Entry(containerFrame,width=SEG_TRIM_ENTRY_WIDTH)
     SegSelectionTimes.insert(0, "start 10 20 ringrange 40 2 start 100 296 hole 155 175")
-    SegSelectionTimes.grid(row=1, column=1)
+    SegSelectionTimes.grid(row=2, column=1)
+    
+    InfoAdd= tk.Entry(containerFrame,width=len(DEFAULT_VID_INFOADD_STRING))
+    InfoAdd.insert(0, DEFAULT_VID_INFOADD_STRING)
+    InfoAdd.grid(row=2, column=2)
+    
 
     __restartGifsUpdate=partial(_restartGifsUpdate,root)
     def radioTogglePlay_Gifs(): #exclusive gifsUpdate - playMode
         GifsUpdate.set(value=not PlayMode.get());__restartGifsUpdate()
-    playModeEnable= tk.Checkbutton(buttonFrame, text="playMode",variable=PlayMode,\
-        command=radioTogglePlay_Gifs,background="green")
-    playModeEnable.grid(row=0, column=2)
+    playModeEnable= tk.Checkbutton(containerFrame, text="playMode",variable=PlayMode,\
+        command=radioTogglePlay_Gifs,background="white")
+    playModeEnable.grid(row=1, column=0)
 
-    gifsUpdate=tk.Checkbutton(buttonFrame, text="GifsUpdate",variable=GifsUpdate,command=__restartGifsUpdate)
-    gifsUpdate.grid(row=0,column=6)
+    gifsUpdate=tk.Checkbutton(containerFrame, text="GifsUpdate",variable=GifsUpdate,command=__restartGifsUpdate)
+    gifsUpdate.grid(row=1,column=1)
     #remove items UI logic
-    remMode= tk.Checkbutton(buttonFrame, text="removeMode",variable=RemoveModeEnable)
-    remMode.grid(row=0,column=3)
-    delGroup= tk.Checkbutton(buttonFrame, text="DelGroupKeepOne",variable=DeleteGroupKeepOne)
-    delGroup.grid(row=0,column=4)
+    remMode= tk.Checkbutton(containerFrame, text="removeMode",variable=RemoveModeEnable)
+    remMode.grid(row=1,column=2)
+    delGroup= tk.Checkbutton(containerFrame, text="DelGroupKeepOne",variable=DeleteGroupKeepOne)
+    delGroup.grid(row=1,column=3)
     remSel=partial(_removeSelected,SelectedList)
-    delSelection=tk.Button(buttonFrame,command=remSel, text="DEL_SELECTED",background="red")
-    delSelection.grid(row=0, column=5)
+    delSelection=tk.Button(containerFrame,command=remSel, text="DEL_SELECTED",background="red")
+    delSelection.grid(row=1, column=4)
 
 
     #root.after_idle(_nextPage,items,drawGif,sFrame)
@@ -488,55 +530,79 @@ def guiMinimalStartGroupsMode(groups,trgtAction=itemsGridViewStart,trgtActionExt
     rootTk.mainloop()
     return SelectedList
 
-if __name__ == "__main__": 
+def argParseMinimal(args):
+    # minimal arg parse use to parse optional args
+    parser = ArgumentParser(description=__doc__)
+    parser.add_argument("pathStart", type=str, help="path to start recursive search of vids")
+    parser.add_argument("--selectionMode", type=str, default="ITEMS",choices=["ITEMS","GROUPS"],\
+                        help="ITEMS: select single items,\
+                        GROUPS, select items in groups generated by --grouppingRule")
 
-    startSearch="."
-    SEL_MODE="GROUPS"#"ITEMS"
-    use_dump_items_founded=USE_DUMP_ITEMS_FOUNDED
-    mergeDumpedCutpoints=False
-    grouppingFunc=ffmpegConcatDemuxerGroupping#ffmpegConcatFilterGroupping #
-
-    if len(argv)>1 and "-h" in argv[1]:
-        print("usage: [startPathSearch,selectionMode,useDumpItemsFilepath,rescanAndMergeCutpoints]")
-        exit(1)
+    parser.add_argument("--notReuseOldSerialization", type=str, default=False, \
+                        help="not use items scanned previously in a namedTuple json serialization file")
+    parser.add_argument("--itemsDumpFilepath", type=str, default=ITEMS_LAST_FOUND,\
+                        help="use items scanned previously in a json serialization file\
+                        \"\" to avoid or disable by env var set DUMP_ITEMS_FOUNDED=FALSE")
+    parser.add_argument("--rescanAndMergeCutpoints",type=bool,default=False,\
+                        help="update previous serialized items dump with a new scan,\
+                        overwriting trimSegments fields in items with common nameID")
+    parser.add_argument("--whitelistPaths",type=str,default=None,\
+                        help="keep founded vid if match some nameID extracted from the given fpath list file")
     
-    if len(argv)>1: startSearch=argv[1]
-    if len(argv)>2: SEL_MODE=argv[2]
-    if len(argv)>3: use_dump_items_founded,ITEMS_LAST_FOUND=True,argv[3]
-    if len(argv)>4: mergeDumpedCutpoints=True
+    parser.add_argument("--grouppingRule", type=str,\
+         default=ffmpegConcatDemuxerGroupping.__name__,choices=list(GrouppingFunctions.keys()),\
+         help="groupping mode of items")
 
+    nsArgParsed = parser.parse_args(args)
+    nsArgParsed.grouppingRule = GrouppingFunctions[nsArgParsed.grouppingRule]   #set groupping function by selected name
+    
+    return nsArgParsed
+
+if __name__ == "__main__": 
+    args=argParseMinimal(argv[1:])
+    grouppingFunc=ffmpegConcatDemuxerGroupping#ffmpegConcatFilterGroupping #
+    items,itemsRestored=list(),list()
     ##Get items scanning fs or using previous backup
     start=perf_counter()
-    try:#avoid fs scan reusing previous scanned items 
-                if use_dump_items_founded:  dumpFp = open(ITEMS_LAST_FOUND, "r")
-                print("stat of",ITEMS_LAST_FOUND,stat(ITEMS_LAST_FOUND))
-    except:     use_dump_items_founded = False
+    reusePreviousSerialization=CONF["DUMP_ITEMS_FOUNDED"] and not args.notReuseOldSerialization
+    if reusePreviousSerialization:
+        try:#avoid fs scan reusing previous scanned items
+            dumpFp=open(args.itemsDumpFilepath)
+            print("stat of",dumpFp.name,stat(dumpFp.name))
+            itemsRestored = deserializeSelection(dumpFp)
+        except:
+            items = list(ScanItems(args.pathStart, forceMetadataGen=False).values())
+            args.itemsDumpFilepath=ITEMS_LAST_FOUND #force default serialization file
 
-    if use_dump_items_founded and not mergeDumpedCutpoints:
-            items = deserializeSelection(dumpFp)
-    else:   items = list(GetItems(startSearch, forceMetadataGen=False).values())
+    if args.rescanAndMergeCutpoints or not reusePreviousSerialization:   #scan new vids[merge with serilization]
+        items = list(ScanItems(args.pathStart, forceMetadataGen=False).values())
+        if len(itemsRestored)>0: updateCutpointsFromSerialization(items, itemsRestored)
+    else: items=itemsRestored
+
+    if len(items) > 0: genMetadata(items)   #tuplelist are readOnly TODO REPLCE BY LIST INDEX, BUT DEL OBJ METHODS
+
     endItemsGet = perf_counter()
-    print(len(items),"source items get in",endItemsGet-start,"used previous dump:",use_dump_items_founded)
-    items = FilterItems(items, metadataPresent=False,\
-            gifPresent=DRAW_GIF, tumbnailPresent=(not DRAW_GIF),durationPos=False)
+    print(len(items),"source items get in",endItemsGet-start,"used previous dump:",len(itemsRestored)>0)
 
-    if not use_dump_items_founded: genMetadata(items)   #tuplelist are readOnly
-    if mergeDumpedCutpoints:
-            updateCutpointsFromSerialization(items,deserializeSelection(dumpFp))
+    #filtering
+    items=FilterItems(items, metadataPresent=False,gifPresent=DRAW_GIF, tumbnailPresent=(not DRAW_GIF),durationPos=False)
+    if args.whitelistPaths!=None: ItemsNamelistRestrict(items,args.whitelistPaths)
+        
     ##selection mode
-    if SEL_MODE=="GROUPS":
-        groups=GetGroups(items,grouppingRule=grouppingFunc,startSearch=startSearch,\
-                filterTumbnail=(not DRAW_GIF),filterGif=DRAW_GIF)
+    if args.selectionMode=="GROUPS":
+        groups=GetGroups(items,grouppingRule=grouppingFunc,startSearch=args.pathStart, \
+                filterTumbnail=(not DRAW_GIF),filterGif=CONF["DRAW_GIF"])
         endGroupGet=perf_counter()
         print("source group get in",endGroupGet-endItemsGet,\
-                "used previous dump ",use_dump_items_founded)
+                "used previous dump ",args.itemsDumpFilepath)
         groups=FilterGroups(groups,100,mode="dur") #filter small groups
         guiMinimalStartGroupsMode(groups,trgtActionExtraArgs=[True,True])
-    elif SEL_MODE=="ITEMS": itemsGridViewStart(items,drawGif=DRAW_GIF)
 
-    else:   raise Exception("invalid input selectionMode "+SEL_MODE+" not in [GROUPS,ITEMS]")
+    elif args.selectionMode=="ITEMS": itemsGridViewStart(items,drawGif=DRAW_GIF)
 
-    if DUMP_ITEMS_FOUNDED:
-        if use_dump_items_founded and not mergeDumpedCutpoints:
-            dump(items,open(ITEMS_LAST_FOUND, "w"),indent=JSON_INDENT)
-        else: SerializeSelection(items,filename=ITEMS_LAST_FOUND)
+    if CONF["DUMP_ITEMS_FOUNDED"]:
+        for x in range(len(items)):
+            if isinstance(items[x],Vid): items[x]=items[x].toTuplelist()
+        dump(items, open(args.itemsDumpFilepath,"w"), indent=JSON_INDENT)
+        print("dumped on ",args.itemsDumpFilepath,len(items),"items")
+        #if args.itemsDumpFilepath!="" and not args.rescanAndMergeCutpoints:        else: SerializeSelection(items,filename=ITEMS_LAST_FOUND)

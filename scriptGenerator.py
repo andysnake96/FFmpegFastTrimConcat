@@ -86,7 +86,7 @@ def GenTrimReencodinglessScriptFFmpeg(items, accurateSeek=False, outFname=None,
     outLines = list()
     outLines.append("mkdir -p "+dstCutDir+" \n")
     outLines.append("FFMPEG='~/ffmpeg' #/home/andysnake/ffmpeg/bin/nv/ffmpeg_g #custom ffmpeg\n")
-    outLines.append("FFMPEG+=\"-loglevel error -hide_banner -n \"  \n")
+    outLines.append("FFMPEG+=\" -loglevel error -hide_banner -n \"  \n")
     for i in items:
         cutSubDir=dstCutDir+"/"+i.nameID+"/"
         outLines.append("mkdir -p '"+cutSubDir+"'\n")
