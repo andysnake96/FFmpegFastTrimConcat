@@ -41,7 +41,7 @@ btnOff=lambda btn: btn.config(highlightbackground="black",highlightcolor="black"
   highlightthickness=BTN_NN_SELECTED_THICKNESS,borderwidth=BTN_NN_SELECTED_THICKNESS)
 ##global vars supporting this GUI
 RootTk=None
-pgN =0  #page (subset) of items to grid
+PGN =0  #page (subset) of items to grid
 stopGifsUpdate=False #set to true when to stop the gifs update
 
 ###button logics
@@ -269,15 +269,15 @@ def _getPreview(path,refObj,getGif=False):
     return PreviewTuple(refObj,img,None)
 
 
-def _drawPage(items,drawGif,root,decresePgN=False,pageNumber=pgN):
+def _drawPage(items, drawGif, root, decresePgN=False, pageNumber=None):
     #stub to draw a page of items,
     #actual page num in global pgN var, updated with resulting page drawed
-    global pgN,sFrame,  nextPage
-    pgN=pageNumber
+    global PGN,sFrame,  nextPage
+    if pageNumber!=None: PGN=pageNumber
     if decresePgN: 
-        pgN-=1
-        if pgN<0: pgN=len(items)//GUI_ITEMS_LIMIT 
-    if pgN*GUI_ITEMS_LIMIT > len(items): pgN = 0
+        PGN-=1
+        if PGN<0: PGN= len(items) // GUI_ITEMS_LIMIT
+    if PGN*GUI_ITEMS_LIMIT > len(items): PGN = 0
 
     #delete previous scroll frame
     #(global because this stub is linked to a btn -> woud always pass the same ref)
@@ -292,11 +292,11 @@ def _drawPage(items,drawGif,root,decresePgN=False,pageNumber=pgN):
     sFrame=VerticalScrolledFrame(root)
     sFrame.grid() #(row=1,column=0)
 
-    drawItems(items[pgN*GUI_ITEMS_LIMIT:(pgN+1)*GUI_ITEMS_LIMIT],drawGif,sFrame)
+    drawItems(items[PGN * GUI_ITEMS_LIMIT:(PGN + 1) * GUI_ITEMS_LIMIT], drawGif, sFrame)
 
-    print("drawed page Num:", pgN,id(sFrame))
-    if not decresePgN:  pgN += 1
-    nextPage.configure(text="nextPage: "+str(pgN))
+    print("drawed page Num:", PGN, id(sFrame))
+    if not decresePgN:  PGN += 1
+    nextPage.configure(text="nextPage: "+str(PGN))
 
 
 def drawItems(items,drawGif,mainFrame):
@@ -431,10 +431,7 @@ def itemsGridViewStart(itemsSrc,subWindow=False,drawGif=False,sort="size"):
          background="yellow")
     prevPage.grid(row=0,column=0)
     nextPg = partial(_drawPage,items,drawGif,root)
-    nextPage = tk.Button(containerFrame, command=nextPg, text="nextPage>>",\
-         background="yellow")
-    nextPg = partial(_drawPage,items,drawGif,root)
-    nextPage = tk.Button(containerFrame, command=nextPg, text="nextPage",\
+    nextPage = tk.Button(containerFrame, command=lambda: _drawPage(items,drawGif,root), text="nextPage>>",\
          background="yellow")
     nextPage.grid(row=0, column=1)
 
@@ -571,7 +568,7 @@ if __name__ == "__main__":
             print("stat of",dumpFp.name,stat(dumpFp.name))
             itemsRestored = deserializeSelection(dumpFp)
         except:
-            items = list(ScanItems(args.pathStart, forceMetadataGen=False).values())
+            itemsRestored = list(ScanItems(args.pathStart, forceMetadataGen=False).values())
             args.itemsDumpFilepath=ITEMS_LAST_FOUND #force default serialization file
 
     if args.rescanAndMergeCutpoints or not reusePreviousSerialization:   #scan new vids[merge with serilization]
