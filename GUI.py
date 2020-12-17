@@ -41,7 +41,7 @@ btnOff=lambda btn: btn.config(highlightbackground="black",highlightcolor="black"
   highlightthickness=BTN_NN_SELECTED_THICKNESS,borderwidth=BTN_NN_SELECTED_THICKNESS)
 ##global vars supporting this GUI
 RootTk=None
-PGN =0  #page (subset) of items to grid
+NextPGN =0  #next page => (subset) of items to grid
 stopGifsUpdate=False #set to true when to stop the gifs update
 
 ###button logics
@@ -64,18 +64,20 @@ def _select(selected):
         operative mode determine if delete,play,append to SelectedList...(global flags)
     """
     global SelectedList,btns
-    #operative mode selection modifiers
-    global PlayMode, SegSelectionMode, SegSelectionTimes,InfoAdd, RemoveModeEnable, DeleteGroupKeepOne
+    global PlayMode, SegSelectionMode, SegSelectionTimes,InfoAdd,\
+             RemoveModeEnable, DeleteGroupKeepOne
 
     button=btns[selected.nameID]
     print("selected\t:",selected,"current tot selection:",len(SelectedList))
 
-    if PlayMode.get(): 
-        if PLAY_SEG_FIRST and len(selected.segPaths)>0: 
+    if PlayMode.get():
+        target=selected.pathName
+        if PLAY_SEGS_FIRST and len(selected.segPaths)>0: 
             target=" ".join(selected.segPaths)
-            if selected.pathName!=None: target+=" "+selected.pathName #source vid if exist
-            return play(target,"vlc -f ")
-        else:   return play(selected.pathName,"vlc -f ")
+            if selected.pathName!=None: target+=" "+selected.pathName#add also src
+        if PLAY_SELECTION_CUMULATIVE:
+            target+=" "+" ".join([x.pathName for x in SelectedList])
+        return play(target)
 
     if RemoveModeEnable.get(): #remove the selection
         remTarget=[selected]
@@ -218,7 +220,7 @@ class VerticalScrolledFrame(tk.Frame):
 PreviewTuple=namedtuple("PreviewTuple","showObj tumbnail gif")
 
 ####gif refresh functions
-def getFrames(gifPath,max_frame_n=MAX_FRAME_N):
+def getFrames(gifPath,max_frame_n=CONF["MAX_FRAME_N"]):
     frames = list()
     try:
         gif=Image.open(gifPath)
@@ -257,27 +259,25 @@ def _getPreview(path,refObj,getGif=False):
 
     assert path!="","NULLPATH"
     
-    if getGif!=None:
+    if getGif:
         gif=GifMetadTuple(getFrames(path),[0],[refObj])
         if len(gif.frames) == 0:    return None
         return PreviewTuple(refObj,None,gif)
     
     try:                    
-        img=Image.open(path) #img=ImageTk.PhotoImage(Image.open(imgPath))  
-
-    except Exception as e:  print("invalid prev at: ",path,"\t\t",e)
+        img=Image.open(path)
+    except Exception as e:  print("invalid prev at: ",path,"\t\t",e);return None
     return PreviewTuple(refObj,img,None)
 
 
 def _drawPage(items, drawGif, root, decresePgN=False, pageNumber=None):
     #stub to draw a page of items,
-    #actual page num in global pgN var, updated with resulting page drawed
-    global PGN,sFrame,  nextPage
-    if pageNumber!=None: PGN=pageNumber
+    
+    global NextPGN,sFrame,  nextPage
+    if pageNumber!=None: NextPGN=pageNumber
     if decresePgN: 
-        PGN-=1
-        if PGN<0: PGN= len(items) // GUI_ITEMS_LIMIT
-    if PGN*GUI_ITEMS_LIMIT > len(items): PGN = 0
+        NextPGN-=2  #-1 to return to already shown page, -1 to target prev pg
+        if NextPGN<0: NextPGN= len(items) // CONF["GUI_ITEMS_LIMIT"]
 
     #delete previous scroll frame
     #(global because this stub is linked to a btn -> woud always pass the same ref)
@@ -288,15 +288,16 @@ def _drawPage(items, drawGif, root, decresePgN=False, pageNumber=None):
         sFrame.destroy()
         del sFrame
     except: pass
-
+    #create a new context to draw items
     sFrame=VerticalScrolledFrame(root)
     sFrame.grid() #(row=1,column=0)
 
-    drawItems(items[PGN * GUI_ITEMS_LIMIT:(PGN + 1) * GUI_ITEMS_LIMIT], drawGif, sFrame)
+    drawItems(items[NextPGN * CONF["GUI_ITEMS_LIMIT"]:(NextPGN + 1) * CONF["GUI_ITEMS_LIMIT"]], drawGif, sFrame)
+    print("drawed page Num:", NextPGN,"on frame with id:", id(sFrame))
 
-    print("drawed page Num:", PGN, id(sFrame))
-    if not decresePgN:  PGN += 1
-    nextPage.configure(text="nextPage: "+str(PGN))
+    if not decresePgN:  NextPGN += 1
+    if NextPGN*CONF["GUI_ITEMS_LIMIT"]> len(items): NextPGN = 0 #ring linked pages 
+    nextPage.configure(text="nextPage: "+str(NextPGN))
 
 
 def drawItems(items,drawGif,mainFrame):
@@ -320,15 +321,12 @@ def drawItems(items,drawGif,mainFrame):
     btns={ it.nameID:tk.Button(mainFrame.interior) for it in items }
     prevArgs=list() #preview path,target tkinter show object
     if drawGif:
-        prevArgs=[ (items[i].gifPath,btns[items[i].nameID]) for i in range(len(items))]
+        prevArgs=[ (items[i].gifPath,btns[items[i].nameID],True) for i in range(len(items))]
     else:   
         prevArgs=[ (items[i].imgPath,btns[items[i].nameID]) for i in range(len(items))]
 
     start=perf_counter()
-    if len(prevArgs)>CONF["POOL_TRESHOLD"] and not drawGif: #multi process image parsing
-          print("worker pool concurrent image parsing")
-          processed=list(concurrentPoolProcess(prevArgs,_getPreview,"badTumbNail",CONF["POOL_SIZE"]))
-    else: processed=list(map(lambda args: _getPreview(*args),prevArgs))  #serial, unpack args
+    processed=list(map(lambda args: _getPreview(*args),prevArgs))  #serial, unpack args
     end=perf_counter()
     print("images parsing elapsed:",end-start)
 
@@ -357,7 +355,7 @@ def drawItems(items,drawGif,mainFrame):
                 compound="center",fg="white", font=font)
             gifs.append(gif)
         else:
-            try: tumbrl=ImageTk.PhotoImage(processed[i])
+            try: tumbrl=ImageTk.PhotoImage(processed[i].tumbnail)
             except Exception as e: print("ImgParseErr:",e,item.imgPath,file=stderr);continue
             btn.configure(command=funcTmp,image=tumbrl, text=txt, \
                 compound="center",fg="white", font=font)
@@ -405,8 +403,9 @@ def itemsGridViewStart(itemsSrc,subWindow=False,drawGif=False,sort="size"):
     # root.resizable(True,True)
 
     items=None
-    if drawGif:     items=FilterItems(itemsSrc,gifPresent=True,metadataPresent=True,durationPos=False) #TODO TEST WITH STUB VID -> NO METADATA GENNABLE
-    else:           items=FilterItems(itemsSrc,tumbNailPresent=True)
+    print("drawGif",drawGif)
+    if drawGif:     items=FilterItems(itemsSrc,gifPresent=True,metadataPresent=True,durationPos=False)
+    else:           items=FilterItems(itemsSrc,tumbnailPresent=True)
     for i in items:
         if i.sizeB == None:
             print(i)
@@ -562,11 +561,13 @@ if __name__ == "__main__":
     ##Get items scanning fs or using previous backup
     start=perf_counter()
     reusePreviousSerialization=CONF["DUMP_ITEMS_FOUNDED"] and not args.notReuseOldSerialization
+    previousDumpUsed=False
     if reusePreviousSerialization:
         try:#avoid fs scan reusing previous scanned items
             dumpFp=open(args.itemsDumpFilepath)
             print("stat of",dumpFp.name,stat(dumpFp.name))
             itemsRestored = deserializeSelection(dumpFp)
+            previousDumpUsed=True
         except:
             itemsRestored = list(ScanItems(args.pathStart, forceMetadataGen=False).values())
             args.itemsDumpFilepath=ITEMS_LAST_FOUND #force default serialization file
@@ -579,10 +580,10 @@ if __name__ == "__main__":
     if len(items) > 0: genMetadata(items)   #tuplelist are readOnly TODO REPLCE BY LIST INDEX, BUT DEL OBJ METHODS
 
     endItemsGet = perf_counter()
-    print(len(items),"source items get in",endItemsGet-start,"used previous dump:",len(itemsRestored)>0)
+    print(len(items),"source items get in",endItemsGet-start,"used previous dump:",previousDumpUsed)
 
     #filtering
-    items=FilterItems(items, metadataPresent=False,gifPresent=DRAW_GIF, tumbnailPresent=(not DRAW_GIF),durationPos=False)
+    items=FilterItems(items, metadataPresent=False,gifPresent=CONF["DRAW_GIF"], tumbnailPresent=(not CONF["DRAW_GIF"]),durationPos=False)
     if args.whitelistPaths!=None: ItemsNamelistRestrict(items,args.whitelistPaths)
         
     ##selection mode
@@ -595,7 +596,7 @@ if __name__ == "__main__":
         groups=FilterGroups(groups,100,mode="dur") #filter small groups
         guiMinimalStartGroupsMode(groups,trgtActionExtraArgs=[True,True])
 
-    elif args.selectionMode=="ITEMS": itemsGridViewStart(items,drawGif=DRAW_GIF)
+    elif args.selectionMode=="ITEMS": itemsGridViewStart(items,drawGif=CONF["DRAW_GIF"])
 
     if CONF["DUMP_ITEMS_FOUNDED"]:
         for x in range(len(items)):

@@ -114,19 +114,19 @@ class Vid:
     def toTuplelist(self):
         """ save ram converting to a namedtuple the current object """
         return VidTuple(self.nameID,self.pathName,self.sizeB,self.gifPath,self.imgPath,\
-         self.metadataPath,self.metadata,self.duration,self.extension,self.cutPoints,self.trimCmds,self.segPaths,self.info,self.date)
+         self.metadataPath,self.metadata,self.duration,self.extension,self.cutPoints,\
+         self.trimCmds,self.segPaths,self.info,self.date)
 
 
 vidNamedTuple2Obj=lambda trgt: Vid().fromJson(trgt._asdict(), False)
 
 
 #support function
-def play(vidPath, playBaseCmd="ffplay -autoexit -fs "):
-    """play the Vid with the given playBaseCmd given """
-    cmd = playBaseCmd +"'"+vidPath+"'"
-    # run(cmd.split())
-    # out=Popen(cmd.split(),stderr=DEVNULL,stdout=DEVNULL)
-    print("play: ", cmd)
+def play(vidPath, playBaseCmd=CONF["PLAY_CMD"]):
+    """play the given Vids with playBaseCmd 
+       vids may be a single path or space separated pathnames of vids """
+    cmd = playBaseCmd+" "+vidPath
+    print("to play: ", cmd)
     #out = Popen(cmd.split(), stderr=DEVNULL, stdout=DEVNULL)
     out = system(cmd+" 1>/dev/null 2>/dev/null &\n")
 
@@ -449,7 +449,7 @@ def selectGroupTextMode(groups,joinGroupItems=True):
 pathsToNameIDlist=lambda paths: [extractExtension(p)[1] for p in paths]
     
 def FilterItems(items, pathPresent=True,tumbnailPresent=False,gifPresent=False,\
-         metadataPresent=True,durationPos=True,filterKW=FilterKW,keepNIDS=list()):
+         metadataPresent=True,durationPos=False,filterKW=FilterKW,keepNIDS=list()):
     """
     filter items by the optional flags passed
     @items: source items list
@@ -493,7 +493,7 @@ def FilterItems(items, pathPresent=True,tumbnailPresent=False,gifPresent=False,\
 
     
     filtered=len(items)-len(outList)
-    if filtered>0: print("filtered:",filtered,"items")
+    if filtered>0: print("filtered:",filtered,"items",tumbnailPresent,gifPresent)
     return outList
 
 #filter items with nameid contained in a pathname in nameListFilterFile
@@ -550,7 +550,7 @@ def trimSegCommand(vid,cmd,start=0,end=None,newCmdOnErr=True,overwriteCutPoints=
                 
                 #ringrange center[,radious]
                 elif "r" in fieldCurr or "ringRange" in fieldCurr:
-                    radious = RADIUS_DFLT
+                    radious = CONF["RADIUS_DFLT"]
                     center = parseTimeOffset(fields[f + 1], True) #convert to secs (float)
                     if f + 2 < len(fields) and fields[f + 2].replace(".","").isdigit():   
                         radious = float(fields[f + 2])
@@ -570,7 +570,7 @@ def trimSegCommand(vid,cmd,start=0,end=None,newCmdOnErr=True,overwriteCutPoints=
             print("invalid cut cmd: ", cmd, e,"!!!!",file=stderr)
             if newCmdOnErr: 
                 fields=input("re-enter a valid trim command:\n"+trimSelectionPrompt).split()
-                play(vid,PLAY_CMD)
+                play(vid,CONF["PLAY_CMD"])
                 replay=True
 
     #backup the cmds 
@@ -616,7 +616,7 @@ def TrimSegmentsIterative(itemsList, skipNameList=None, dfltStartPoint=0, dfltEn
             print("curr cutPoints:\t", _printCutPoints(item.cutPoints))
             #drawSegmentsTurtle([item]) #TODO turtle.Terminator
         
-        play(item.pathName ,PLAY_CMD)
+        play(item.pathName ,CONF["PLAY_CMD"])
         # Prompt String
         cmd = input("Add Vid "+item.nameID+" dur " +str(item.duration/60) + "min, size "+\
                 str(item.sizeB/2**20)+"MB"+ trimSelectionPrompt)

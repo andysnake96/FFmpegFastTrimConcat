@@ -151,7 +151,7 @@ if __name__ == "__main__":
     GUI_SELECT_GROUP_ITEMS = True  # if ITERATIVE_PLAY_CONFIRM: select group on gui
     ### getting items
     startPath = [startPath]
-    if PATH_SEP in nsArgParsed.pathStart: startPath = nsArgParsed.pathStart.split(PATH_SEP)
+    if ":" in nsArgParsed.pathStart: startPath = nsArgParsed.pathStart.split(PATH_SEP)
     mItemsDict, grouppingsOld = dict(), dict()
     for path in startPath:
         mItemsDict = ScanItems(path, mItemsDict, False)
