@@ -60,7 +60,7 @@ VidTuple = namedtuple("Vid", attributes)
 class Vid:
     """Video items attributes plus useful operation on an item"""
     def __init__(self, multimediaNameK):
-        self.nameID = multimediaNameK  # AS UNIQUE ID -> MULTIMEDIA NAME (no path and no suffix)
+        self.nameID = multimediaNameK  #UNIQUE ID
         #basic metadata for a video
         self.pathName = None
         self.sizeB = 0
@@ -73,7 +73,7 @@ class Vid:
         #trimSeg informations
         self.cutPoints = list() #cut times for segments generation [[start,end],...] 
         self.trimCmds  = list() #cmds to gen cutPoints (just for quick segs backup)
-        self.segPaths  = list() #vid's segment trimmed file paths as .mp4.SEGMENT_NUM.mp4
+        self.segPaths  = list() #segment trimmed file paths as .mp4.SEGMENT_NUM.mp4
         #var additional
         self.info=[""]  #additional infos - label like
         self.date=None  #vid file last access date TODO UNBINDED
@@ -134,10 +134,9 @@ def play(vidPath, playBaseCmd=CONF["PLAY_CMD"]):
 def remove(vid, confirm=True):
     #remove this item, if confirm ask confirmation onthe backed terminal
     #return True if item actually removed
-    cmd = "rm "
-    if vid.pathName!=None: cmd+= " " + vid.pathName
-    if vid.imgPath!=None: cmd+= " " + vid.imgPath
-    if vid.metadataPath!=None: cmd+= " " + vid.metadataPath
+    targets=[x for x in [vid.pathName,vid.imgPath,vid.metadataPath,vid.gifPath] if x != None]
+    if len(vid.segPaths)>0:targets=[vid.pathName] #don't remove metad. to show segs 
+    cmd = "rm "+" ".join(targets)
     if confirm and "Y" in input(cmd+" ???(y||n)\t").upper():
         # out = Popen(cmd.split(), stderr=DEVNULL, stdout=DEVNULL).wait()
         out = run(cmd.split())
@@ -303,6 +302,7 @@ def ScanItems(rootPath=".", vidItems=dict(), PATH_ID=False,forceMetadataGen=CONF
             # extract nameKey and extension from filename, skip it if skipFname gives true
             extension, nameKey = extractExtension(fpath,PATH_ID)
             if skip or skipFname(extension):                     continue
+            print(filename,nameKey)
             # update vidItems dict with the new vid file founded
             item = vidItems.get(nameKey)
             if item == None:
@@ -471,7 +471,7 @@ def FilterItems(items, pathPresent=True,tumbnailPresent=False,gifPresent=False,\
                 and (not durationPos or i.duration>0)
         #audit missing fields for manual operations
         if CONF["AUDIT_MISSERR"] or (not CONF["QUIET"] and not keep):
-            if i.pathName == None:print("missing pathName at",i,file=stderr);continue
+            if i.pathName == None:print("missing pathName at",i.nameID,file=stderr);continue
             if i.imgPath == None and i.gifPath == None: #if at least one of them is fine
                 if i.imgPath == None : print("Missing thumbnail at \t", i.pathName,file=stderr)
                 if i.gifPath == None:  print("Missing gif at \t", i.pathName,file=stderr)

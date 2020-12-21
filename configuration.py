@@ -123,7 +123,7 @@ envConfig(CONF,"NameIdFirstDot",True)#extract nameID as pathname[:first dot]
 
 DEFAULT_VID_INFOADD_STRING="ADD VID'S LABEL/INFOS"
 #export comma separated list of keyword to filter away items after a scan
-FilterKW=["frame","out","fake","group_","?","clips"]
+FilterKW=[]#["frame","out","fake","group_","?","clips"]
 if env.get("FilterKW") != None: FilterKW=env["FilterKW"].split(",") 
 envConfig(CONF,"FORCE_METADATA_GEN",True)# force the gen of metadata foreach vid
 

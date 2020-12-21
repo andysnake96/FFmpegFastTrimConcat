@@ -50,11 +50,13 @@ def _removeSelected(remTarget=SelectedList):
     if not messagebox.askyesno('REMOVE ALL '+str(len(remTarget)),'Del?',icon='warning'):
         return
     for i in remTarget:
-        btn=btns[i.nameID]
         if not remove(i): continue #not removed
-        btnOff(btn)
-        btn.config(state="disabled")
-        del(i,btn,btns[i.nameID])
+        try:
+            btn=btns[i.nameID]
+            btnOff(btn)
+            btn.config(state="disabled")
+            del(i,btn,btns[i.nameID])
+        except: pass
 
     SelectedList=list()
     
@@ -75,8 +77,6 @@ def _select(selected):
         if PLAY_SEGS_FIRST and len(selected.segPaths)>0: 
             target=" ".join(selected.segPaths)
             if selected.pathName!=None: target+=" "+selected.pathName#add also src
-        if PLAY_SELECTION_CUMULATIVE:
-            target+=" "+" ".join([x.pathName for x in SelectedList])
         return play(target)
 
     if RemoveModeEnable.get(): #remove the selection
@@ -236,7 +236,7 @@ def getFrames(gifPath,max_frame_n=CONF["MAX_FRAME_N"]):
 def update(gifs,root):
     global GifsUpdate
     if not GifsUpdate.get(): return;root.after(GIF_UPDATE_POLL*10,update,gifs,root)
-
+    if AUDIT_PERF: start=perf_counter()
     for g in gifs:
         frameIdx=g.frameIdxRef[0]
         frame = g.frames[frameIdx]
@@ -245,6 +245,7 @@ def update(gifs,root):
         g.showObj[0].configure(image=frame)
         
         if CONF["DEBUG"]:   print("showObj id:",id(g.showObj[0]))
+    if AUDIT_PERF: end=perf_counter();print("gifs reDrwaw in:",end-start)
     root.after(CONF["GIF_UPDATE_POLL"], update,gifs,root)
 
 GifMetadTuple=namedtuple("GifMetadata","frames frameIdxRef showObj ")
@@ -393,7 +394,7 @@ def itemsGridViewStart(itemsSrc,subWindow=False,drawGif=False,sort="size"):
     @sort: items sorting, either: duration,size,sizeName,shuffle,nameID
     When tkinter root closed, Returns SelectedList of items
     """
-    global nextPage, items, RemoveModeEnable
+    global nextPage, items, RemoveModeEnable,SelectedList
     global PlayMode, SegSelectionMode, SegSelectionTimes,InfoAdd, DeleteGroupKeepOne,GifsUpdate
     
     #get the gui tkinter container window for the element to grid inside
@@ -461,6 +462,8 @@ def itemsGridViewStart(itemsSrc,subWindow=False,drawGif=False,sort="size"):
     __restartGifsUpdate=partial(_restartGifsUpdate,root)
     def radioTogglePlay_Gifs(): #exclusive gifsUpdate - playMode
         GifsUpdate.set(value=not PlayMode.get());__restartGifsUpdate()
+        if PLAY_SELECTION_CUMULATIVE:play(" ".join([x.pathName for x in SelectedList]))
+
     playModeEnable= tk.Checkbutton(containerFrame, text="playMode",variable=PlayMode,\
         command=radioTogglePlay_Gifs,background="white")
     playModeEnable.grid(row=1, column=0)
