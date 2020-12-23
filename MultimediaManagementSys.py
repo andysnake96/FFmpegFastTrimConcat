@@ -174,7 +174,7 @@ def deserializeSelection(dumpFp,backupCopyPath="/tmp/selectionBackup.json"):
 
 
 def updateCutpointsFromSerialization(items,itemsDumped,overWrFieldsNNEmpty=CONF["OVERWR_FIELDS_NEMPTY"]):
-    """update trimSegments fields of Vids in @items  list
+    """update trimSegments fields of Vids in @items  list inplace
        with the ones in items in @itemsDumped list if they have a common nameId field
        if @overWrFieldsNNEmpty overwrite fields of items in @items 
         with all fields !None in the corresponding matching items in @itemsDumped
@@ -183,9 +183,10 @@ def updateCutpointsFromSerialization(items,itemsDumped,overWrFieldsNNEmpty=CONF[
         in both @items and @itemsDumped
 	"""
     it = { items[i].nameID:i for i in range(len(items)) }
+    c=0
     for i in itemsDumped: 
         #update items matching nameid with corresponding dumped ones
-        if i.nameID in it:  
+        if i.nameID in it: #dumpedItems in new items dict  
                 target=items[it[i.nameID]]
                 #recognize readonly namedtuple in both target and matching one
                 target_isTuple,matching_isTuple=isNamedtuple(target),isNamedtuple(i)
@@ -201,17 +202,19 @@ def updateCutpointsFromSerialization(items,itemsDumped,overWrFieldsNNEmpty=CONF[
                     else:   #normal object
                         fieldsNNEmpty=[x for x in vars(i).items() if nnEmpty(x[1])]
 
-                    if target_isTuple:    target=vidNamedTuple2Obj(target) #create a target tmp copy writable
+                    if target_isTuple: target=vidNamedTuple2Obj(target) #trgt tmp copy writable
                     #replace fields
-                    for x in fieldsNNEmpty: setattr(target,x[0],x[1])
+                    for x in fieldsNNEmpty: setattr(target,x[0],x[1]);c+=1
                     if CONF["AUDIT_DSCPRINT"]: print("overwritten extra fields on",target.nameID,":",fieldsNNEmpty)
                     if target_isTuple:   #reset target as a namedtuple (better perf )
                         target=target.toTuplelist()
                         items[it[i.nameID]]=target 
+    if CONF["AUDIT_DSCPRINT"]: 
+        print("overwritten ",c,"extra fields in",len(items),"items matching in ",len(itemsDumped),"dumped items")
                 
 
 ### Vid Item gather from filesystem
-def extractExtension(filename, PATH_ID,nameIdFirstDot=CONF["NameIdFirstDot"]):
+def extractExtension(filename, PATH_ID=False,nameIdFirstDot=CONF["NameIdFirstDot"]):
     """
     extract the extension and nameID from filename
     @param filename: filepath 
@@ -302,7 +305,6 @@ def ScanItems(rootPath=".", vidItems=dict(), PATH_ID=False,forceMetadataGen=CONF
             # extract nameKey and extension from filename, skip it if skipFname gives true
             extension, nameKey = extractExtension(fpath,PATH_ID)
             if skip or skipFname(extension):                     continue
-            print(filename,nameKey)
             # update vidItems dict with the new vid file founded
             item = vidItems.get(nameKey)
             if item == None:
@@ -480,7 +482,7 @@ def FilterItems(items, pathPresent=True,tumbnailPresent=False,gifPresent=False,\
                 print("invalid duration", i.duration, i.metadataPath, file=stderr)
 
         if len(keepNIDS)>0 and i.nameID not in keepNIDS:
-            print("filtered ",i,"not in nameID s whitelist")
+            if CONF["DEBUG"]:print("filtered ",i,"not in nameID s whitelist")
             keep=False;continue
 
         for kw in filterKW:
@@ -493,7 +495,8 @@ def FilterItems(items, pathPresent=True,tumbnailPresent=False,gifPresent=False,\
 
     
     filtered=len(items)-len(outList)
-    if filtered>0: print("filtered:",filtered,"items",tumbnailPresent,gifPresent)
+    if filtered>0: 
+        print("filtered:",filtered,"/",len(items),"items, residuals:",len(outList))
     return outList
 
 #filter items with nameid contained in a pathname in nameListFilterFile
@@ -582,6 +585,7 @@ def trimSegCommand(vid,cmd,start=0,end=None,newCmdOnErr=True,overwriteCutPoints=
     #embed cutpoints 
     if overwriteCutPoints:  vid.cutPoints.clear()
     vid.cutPoints.extend(segmentationPoints)
+    vid.trimCmds.extend([cmd])
     
     print("selected these cutpoints:",segmentationPoints,"with cmd:\t"+cmd,sep="\n")
     return segmentationPoints

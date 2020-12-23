@@ -57,6 +57,7 @@ envConfig(CONF,"AUDIT_ENV_SET",True)
 envConfig(CONF,"AUDIT_VIDINFO",True)
 envConfig(CONF,"AUDIT_DSCPRINT",True)
 envConfig(CONF,"AUDIT_MISSERR",True)
+envConfig(CONF,"AUDIT_PERF",False)
 envConfig(CONF,"DEBUG",False)
 envConfig(CONF,"QUIET",False)
 if CONF["QUIET"]: #disable audits
@@ -102,7 +103,7 @@ envConfig(CONF,"DISABLE_GUI",False)
 BTN_SELECTED_THICKNESS=4
 BTN_NN_SELECTED_THICKNESS=1
 envConfig(CONF,"GUI_COLSIZE",6)
-lim=envConfig(CONF,"GUI_ITEMS_LIMIT",250)#max items 4 page (tkinter own limit~200)
+lim=envConfig(CONF,"GUI_ITEMS_LIMIT",55)#max items 4 page (tkinter own limit~200)
 lim-=lim%CONF["GUI_COLSIZE"]#end page with a full row
 CONF["GUI_ITEMS_LIMIT"]=lim
 
@@ -138,13 +139,9 @@ CONCAT_FILELIST_FNAME="concat.list"
 BASH_BATCH_SEGS_GEN="genSegs.sh"
 CONCAT_FILTER_FILE="concat_filter_file.sh"
 #ffmpeg configs
-FFmpegNvidiaAwareDecode = " -vsync 0 -hwaccel cuvid -c:v h264_cuvid "
-FFmpegNvidiaAwareEncode = " -c:v h264_nvenc -preset fast -coder vlc "
-FFmpegDbg = " -hide_banner -y -loglevel 'error' "
-FFmpegNvidiaAwareBuildPath = "/home/andysnake/ffmpeg/bin/nv/ffmpeg_g " + FFmpegDbg
-FFmpegBasePath = "~/ffmpeg/bin/ffmpeg "
-
-FFMPEG = FFmpegNvidiaAwareBuildPath
+envConfig(CONF,"FFMPEG","/home/andysnake/ffmpeg/bin/nv/ffmpeg_g ")
+FFmpegNvidiaAwareDecode =CONF["FFMPEG"]+ " -vsync 0 -hwaccel cuvid -c:v h264_cuvid "
+FFmpegNvidiaAwareEncode =CONF["FFMPEG"]+ " -c:v h264_nvenc -preset fast -coder vlc "
 #TODO REMOVE
 Encode = FFmpegNvidiaAwareEncode
 Decode = FFmpegNvidiaAwareDecode

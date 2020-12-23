@@ -22,48 +22,6 @@ from utils import cleanPathname, parseTimeOffset
 SegGenOptionsDflt = {"segsLenSecMin": None, "segsLenSecMax": None, "maxSegN": 1,
      "minStartConstr": 0,"maxEndConstr": None}
 
-# python3 -c from MultimediaManagementSys import *; SegGenOptionsDflt['maxEndConstr']=-5;GenPlayIterativeScript(DeserializeSelectionSegments(open('selection.list').read()),outFilePath='selectionPlaySegs.sh')
-
-def GenPlayIterativeScript(items, baseCmd="ffplay -autoexit ",
-    segGenConfig=SegGenOptionsDflt, outFilePath=None):
-    """generate a bash script to play all items selected segments
-       if no segmenet embedded inside Vid -> play the whole video
-       UC review a serialized selection file
-    """
-    outLines = list()
-    j = 0
-    ##startConstr=segGenConfig["minStartConstr"]    #TODO?
-    ##endConstr=segGenConfig["maxEndConstr"]
-    for i in items:
-        if i.cutPoints != list():
-            for s in i.cutPoints:
-                playCmd = baseCmd
-                playCmd += " -ss " + str(s[0])
-                # set segEndTime default overridable by nn None seg end
-                end = i.duration
-                if s[1] != None: end = s[1]
-                # if end<=0:end+=i.duration
-                print(end, s[0], "\n")
-                # compute end with duration from seeked start
-                t = parseTimeOffset(end, True) - parseTimeOffset(s[0],True)  
-                playCmd += " -t " + str(t)
-                playCmd += " -window_title '" + str(j) + "  " + i.nameID + "'"
-                playCmd += " '" + i.pathName + "'\n"
-                outLines.append(playCmd)
-                j += 1
-        else:  # no segs defined for current item
-            playCmd = baseCmd + " -window_title " + str(j) + " '" + i.pathName + "'\n"
-            outLines.append(playCmd)
-            j += 1
-
-    if outFilePath != None:
-        fp = open(outFilePath, "w")
-        fp.writelines(outLines)
-        fp.close()
-    else:
-        print(outLines)
-    return outLines
-
 
 def GenTrimReencodinglessScriptFFmpeg(items, accurateSeek=False, outFname=None,
     dstCutDir="cuts"):
@@ -85,8 +43,11 @@ def GenTrimReencodinglessScriptFFmpeg(items, accurateSeek=False, outFname=None,
 
     outLines = list()
     outLines.append("mkdir -p "+dstCutDir+" \n")
-    outLines.append("FFMPEG='~/ffmpeg' #/home/andysnake/ffmpeg/bin/nv/ffmpeg_g #custom ffmpeg\n")
-    outLines.append("FFMPEG+=\" -loglevel error -hide_banner -n \"  \n")
+
+    outLines.append("#ffmpegBin='~/ffmpeg' #/home/andysnake/ffmpeg/bin/nv/ffmpeg_g #custom ffmpeg\n")
+    outLines.append("ffmpegBin="+CONF["FFMPEG"]+"\n")
+    outLines.append("ffmpegBin+=\" -loglevel error -hide_banner -n \"  \n")
+    outLines.append("if [[ $FFMPEG ]];then ffmpegBin=$FFMPEG;fi\n")
     for i in items:
         cutSubDir=dstCutDir+"/"+i.nameID+"/"
         outLines.append("mkdir -p '"+cutSubDir+"'\n")
@@ -98,19 +59,24 @@ def GenTrimReencodinglessScriptFFmpeg(items, accurateSeek=False, outFname=None,
         
         # for each segments embedded generate ffmpeg -ss -to -i vid.pathName -c copy ...
         ffmpegInputPath = " -i '" + i.pathName+"' "
+        dstPaths=list()
         for s in range(cutPointsNum):
             seg = i.cutPoints[s]
-            trimSegCmd = "eval $FFMPEG "
+            trimSegCmd = "eval $ffmpegBin "
             if accurateSeek: trimSegCmd += ffmpegInputPath     #seek as output opt
             trimSegCmd += " -ss " + str(seg[0])
             if seg[1] != None: trimSegCmd += " -to " + str(seg[1])
             if not accurateSeek: trimSegCmd += ffmpegInputPath #seek as input opt
             trimSegCmd += " -c copy -avoid_negative_ts make_zero " #shift ts
             #name seg file with progressive suffix
-            dstPath= " '"+cutSubDir+i.pathName.split("/")[-1]+ "." + str(s) + ".mp4'"  
-            trimSegCmd+=dstPath
-            outLines.append(trimSegCmd + "\n")
+            dstPaths.append(" '"+cutSubDir+i.pathName.split("/")[-1]+ "." + str(s) + ".mp4'")
+            trimSegCmd+=dstPaths[s]
+            outLines.append(trimSegCmd + "&& echo success done seg:"+str(s)+"\n")
         outLines.append("#rm " + i.pathName + "\n"+"#"*22+"\n")  # commented remove cmd for currnt vid
+        #prepare a concat file and command for merging just the trimmed segs
+        outLines.append("#concat.list\n")
+        outLines.append("#file "+"\n#file ".join(dstPaths))
+        outLines.append("#eval $ffmpegBin -f concat -i concat.list -c copy "+cutSubDir+i.pathName.split("/")[-1]+ ".cutsALL.mp4")
 
     if outFname != None:
         fp = open(outFname, "a")
@@ -122,8 +88,8 @@ def GenTrimReencodinglessScriptFFmpeg(items, accurateSeek=False, outFname=None,
 ### SEG CUT CMD GEN
 #RE-ENCODINGLESS
 ## cut a selected segment of video with seek options as input or output(more accurate ??)
-buildFFMPEG_segExtractNoReencode=lambda pathName,segStart,segTo,destPath:"eval $FFMPEG" +" -ss " + str(segStart) +" -to " + str(segTo) +" -i '" + pathName +"' -c copy -avoid_negative_ts make_zero " + cleanPathname(destPath)
-buildFFMPEG_segExtractPreciseNoReencode=lambda pathName,segStart,segTo,destPath:"eval $FFMPEG" +" -i '" + pathName+"' -ss " + str(segStart) +" -to " + str(segTo)  +" -c copy -avoid_negative_ts make_zero " + cleanPathname(destPath)
+buildFFMPEG_segExtractNoReencode=lambda pathName,segStart,segTo,destPath:"eval $ffmpegBin" +" -ss " + str(segStart) +" -to " + str(segTo) +" -i '" + pathName +"' -c copy -avoid_negative_ts make_zero " + cleanPathname(destPath)
+buildFFMPEG_segExtractPreciseNoReencode=lambda pathName,segStart,segTo,destPath:"eval $ffmpegBin" +" -i '" + pathName+"' -ss " + str(segStart) +" -to " + str(segTo)  +" -c copy -avoid_negative_ts make_zero " + cleanPathname(destPath)
 #RE-ENCODING
 buildFFMPEG_segTrimPreSeek=lambda pathName,segStart,segTo,destPath:FFMPEG+" -ss "+str(segStart)+" -i "+pathName+" -vf trim="+str(segStart)+":"+str(segTo)+Encode+"'"+destPath+"'" #trim filter
 buildFFMPEG_segTrim=lambda pathName,segStart,segTo,destPath:FFMPEG+Decode+" -ss "+str(segStart)+" -i "+pathName+" -vf trim="+str(segStart)+":"+str(segTo)+Encode+"'"+destPath+"'" #trim filter
@@ -306,6 +272,48 @@ def FFmpegConcatFilter(itemsList, outScriptFname, segGenConfig=None,
         outFp.write(ffmpegConcatFilterCmd)
         outFp.close()
 
+
+# python3 -c from MultimediaManagementSys import *; SegGenOptionsDflt['maxEndConstr']=-5;GenPlayIterativeScript(DeserializeSelectionSegments(open('selection.list').read()),outFilePath='selectionPlaySegs.sh')
+
+def GenPlayIterativeScript(items, baseCmd="ffplay -autoexit ",
+    segGenConfig=SegGenOptionsDflt, outFilePath=None):
+    """generate a bash script to play all items selected segments
+       if no segmenet embedded inside Vid -> play the whole video
+       UC review a serialized selection file
+    """
+    outLines = list()
+    j = 0
+    ##startConstr=segGenConfig["minStartConstr"]    #TODO?
+    ##endConstr=segGenConfig["maxEndConstr"]
+    for i in items:
+        if i.cutPoints != list():
+            for s in i.cutPoints:
+                playCmd = baseCmd
+                playCmd += " -ss " + str(s[0])
+                # set segEndTime default overridable by nn None seg end
+                end = i.duration
+                if s[1] != None: end = s[1]
+                # if end<=0:end+=i.duration
+                print(end, s[0], "\n")
+                # compute end with duration from seeked start
+                t = parseTimeOffset(end, True) - parseTimeOffset(s[0],True)  
+                playCmd += " -t " + str(t)
+                playCmd += " -window_title '" + str(j) + "  " + i.nameID + "'"
+                playCmd += " '" + i.pathName + "'\n"
+                outLines.append(playCmd)
+                j += 1
+        else:  # no segs defined for current item
+            playCmd = baseCmd + " -window_title " + str(j) + " '" + i.pathName + "'\n"
+            outLines.append(playCmd)
+            j += 1
+
+    if outFilePath != None:
+        fp = open(outFilePath, "w")
+        fp.writelines(outLines)
+        fp.close()
+    else:
+        print(outLines)
+    return outLines
 
 
 if __name__=="__main__":

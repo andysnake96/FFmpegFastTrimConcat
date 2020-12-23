@@ -102,7 +102,11 @@ def _select(selected):
 
         if DeleteGroupKeepOne.get(): SelectedList=list()
         return
+    #not append to SelectedList exec paths terminate here
 
+    if len(selected.trimCmds)>0 and len(SegSelectionTimes.get().strip())==0:
+        SegSelectionTimes.insert(0,selected.trimCmds[-1]) #add show trim cmd 
+    
     newInfo=InfoAdd.get().strip()
     if newInfo!=DEFAULT_VID_INFOADD_STRING: 
         appendVidInfoStr(selected,newInfo)
@@ -121,7 +125,7 @@ def _select(selected):
             btnSel(button,"blue")
         return
 
-    if selected in SelectedList and len(selected.cutPoints)==0:#already selected in normalmode
+    if selected in SelectedList:# and len(selected.cutPoints)==0:#already selected in normalmode
         SelectedList.remove(selected)
         print("Already selected so popped: ", selected)
         button.flash();button.flash()
@@ -139,17 +143,16 @@ def _flushSelectedItems(selected=SelectedList,logFile=SELECTION_LOGFILE):
     if len(selected)==0:    print("nothing selected!!",file=stderr);return
     cumulSize,cumulDur= 0,0
     toTrim  =[i for i in selected if len(i.cutPoints)>0]
-    selected=[i.pathName+"\n" for i in selected if len(i.cutPoints)==0]
     
     cumulDur=sum([i.duration for i in selected])
     cumulSize=sum([i.sizeB   for i in selected])
     #write selected
     if logFile!=None:
         selectionLogFile=logFile+ctime().replace(" ", "_")
-        f = open(selectionLogFile,"w")
         selectionInfos="# cumulSize: "+str(cumulSize / 2**20)+" MB "+"\t#cumulDur:"+str(cumulDur/60)+" min\n"
+        f = open(selectionLogFile,"w")
+        f.writelines([i.pathName+"\n" for i in selected if len(i.cutPoints)==0])
         f.write(selectionInfos)
-        f.writelines(selected)
         f.close()
         if len(toTrim)>0: 
             GenTrimReencodinglessScriptFFmpeg(toTrim,outFname=selectionLogFile)
@@ -236,7 +239,7 @@ def getFrames(gifPath,max_frame_n=CONF["MAX_FRAME_N"]):
 def update(gifs,root):
     global GifsUpdate
     if not GifsUpdate.get(): return;root.after(GIF_UPDATE_POLL*10,update,gifs,root)
-    if AUDIT_PERF: start=perf_counter()
+    if CONF["AUDIT_PERF"]: start=perf_counter()
     for g in gifs:
         frameIdx=g.frameIdxRef[0]
         frame = g.frames[frameIdx]
@@ -245,7 +248,7 @@ def update(gifs,root):
         g.showObj[0].configure(image=frame)
         
         if CONF["DEBUG"]:   print("showObj id:",id(g.showObj[0]))
-    if AUDIT_PERF: end=perf_counter();print("gifs reDrwaw in:",end-start)
+    if CONF["AUDIT_PERF"]: end=perf_counter();print("gifs reDrwaw in:",end-start)
     root.after(CONF["GIF_UPDATE_POLL"], update,gifs,root)
 
 GifMetadTuple=namedtuple("GifMetadata","frames frameIdxRef showObj ")
@@ -297,7 +300,7 @@ def _drawPage(items, drawGif, root, decresePgN=False, pageNumber=None):
     print("drawed page Num:", NextPGN,"on frame with id:", id(sFrame))
 
     if not decresePgN:  NextPGN += 1
-    if NextPGN*CONF["GUI_ITEMS_LIMIT"]> len(items): NextPGN = 0 #ring linked pages 
+    if NextPGN*CONF["GUI_ITEMS_LIMIT"]> len(items): NextPGN = 1 #ring linked pages 
     nextPage.configure(text="nextPage: "+str(NextPGN))
 
 
@@ -340,6 +343,9 @@ def drawItems(items,drawGif,mainFrame):
         img,gif=prevTup.tumbnail,prevTup.gif
         funcTmp = partial(_select, item)   #BIND FUNCTION FOR SELECTION
 
+        backupCmds=""
+        if len(item.trimCmds)> 0:  backupCmds=" backupCmds#="+str(len(item.trimCmds))
+
         txt = str(p)+": "
         if item.duration != 0:      txt += "duration:\t" + str(item.duration/60)[:6] +" mins"
         if item.sizeB != 0:         txt += "\nsize:\t" + str(item.sizeB/2**20)[:6]+"MB"
@@ -348,8 +354,8 @@ def drawItems(items,drawGif,mainFrame):
             txt += "\ncuts#="+str(len(item.cutPoints))+\
                     truncString(": "+cutStr,14,suffixPatternToShowSep=None)
         if len(item.info[0])>0:    txt+="\n"+truncString(item.info[0],suffixPatternToShowSep=None)
-        elif len(item.segPaths)> 0:  txt+="\ntrim Seg ready#="+str(len(item.segPaths))
-        #elif len(item.trimCmds)> 0:  txt+="\nbackUpCmds#="+str(len(item.trimCmds))
+        elif len(item.segPaths)> 0:  txt+="\nSegsReady#="+str(len(item.segPaths))+backupCmds
+        elif len(item.trimCmds)> 0:  txt+=backupCmds
         
         if drawGif:
             btn.configure(command=funcTmp,text=txt, \
@@ -370,6 +376,7 @@ def drawItems(items,drawGif,mainFrame):
         if col >= colSize:
             col = 0
             row += 1
+        if item in SelectedList: btnSel(btn)#highlight items previously selected
 
     end=perf_counter()
     print("drawed: ",max(len(gifs),len(imgs)),"in secs: ",end-start)
@@ -462,7 +469,8 @@ def itemsGridViewStart(itemsSrc,subWindow=False,drawGif=False,sort="size"):
     __restartGifsUpdate=partial(_restartGifsUpdate,root)
     def radioTogglePlay_Gifs(): #exclusive gifsUpdate - playMode
         GifsUpdate.set(value=not PlayMode.get());__restartGifsUpdate()
-        if PLAY_SELECTION_CUMULATIVE:play(" ".join([x.pathName for x in SelectedList]))
+        if PLAY_SELECTION_CUMULATIVE and PlayMode.get(): 
+            play(" ".join([x.pathName for x in SelectedList]))
 
     playModeEnable= tk.Checkbutton(containerFrame, text="playMode",variable=PlayMode,\
         command=radioTogglePlay_Gifs,background="white")
@@ -570,6 +578,7 @@ if __name__ == "__main__":
             dumpFp=open(args.itemsDumpFilepath)
             print("stat of",dumpFp.name,stat(dumpFp.name))
             itemsRestored = deserializeSelection(dumpFp)
+            print("restored:",len(itemsRestored))
             previousDumpUsed=True
         except:
             itemsRestored = list(ScanItems(args.pathStart, forceMetadataGen=False).values())
@@ -587,7 +596,9 @@ if __name__ == "__main__":
 
     #filtering
     items=FilterItems(items, metadataPresent=False,gifPresent=CONF["DRAW_GIF"], tumbnailPresent=(not CONF["DRAW_GIF"]),durationPos=False)
-    if args.whitelistPaths!=None: ItemsNamelistRestrict(items,args.whitelistPaths)
+    if args.whitelistPaths!=None:
+        itemsFull=items
+        items=ItemsNamelistRestrict(items,args.whitelistPaths)
         
     ##selection mode
     if args.selectionMode=="GROUPS":
@@ -601,7 +612,8 @@ if __name__ == "__main__":
 
     elif args.selectionMode=="ITEMS": itemsGridViewStart(items,drawGif=CONF["DRAW_GIF"])
 
-    if CONF["DUMP_ITEMS_FOUNDED"]:
+    if CONF["DUMP_ITEMS_FOUNDED"]:# and args.whitelistPaths==None:
+        if args.whitelistPaths!=None: items=itemsFull
         for x in range(len(items)):
             if isinstance(items[x],Vid): items[x]=items[x].toTuplelist()
         dump(items, open(args.itemsDumpFilepath,"w"), indent=JSON_INDENT)
