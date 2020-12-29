@@ -17,7 +17,7 @@
 
 from MultimediaManagementSys import *
 from grouppingFunctions import sizeBatching
-from utils import printList
+from utils import printList,TKINTER_COLORS
 from configuration import *
 from scriptGenerator import GenTrimReencodinglessScriptFFmpeg
 
@@ -32,8 +32,10 @@ from copy import copy
 from time import perf_counter,ctime
 from sys import stderr,argv
 from collections import namedtuple
+from math import ceil
 
-SelectedList = list()       #selection modified by GUI 
+SelectedVids= dict() #SelTAG->vidItem
+getTagColor=lambda tag,colors=TKINTER_COLORS: colors[hash(tag)%len(colors)]
 #helper to (de)highlight a button
 btnSel=lambda btn,colo="red": btn.config(highlightbackground=colo,highlightcolor=colo,\
   highlightthickness=BTN_SELECTED_THICKNESS,borderwidth=BTN_SELECTED_THICKNESS)
@@ -45,11 +47,11 @@ NextPGN =0  #next page => (subset) of items to grid
 stopGifsUpdate=False #set to true when to stop the gifs update
 
 ###button logics
-def _removeSelected(remTarget=SelectedList):
-    global SelectedList,btns
-    if not messagebox.askyesno('REMOVE ALL '+str(len(remTarget)),'Del?',icon='warning'):
-        return
-    for i in remTarget:
+def _removeSelected(rmDict=SelectedVids):
+    global SelectedVids,btns
+    if not messagebox.askyesno('REMOVE ALL '+\
+        str(len(unrollDictOfList(rmDict)),'Del?',icon='warning')): return
+    for i in unrollDictOfList(rmDict):
         if not remove(i): continue #not removed
         try:
             btn=btns[i.nameID]
@@ -58,20 +60,25 @@ def _removeSelected(remTarget=SelectedList):
             del(i,btn,btns[i.nameID])
         except: pass
 
-    SelectedList=list()
-    
+    SelectedVids.clear()
+   
 def _select(selected):
     """
         button pressed select an item
-        operative mode determine if delete,play,append to SelectedList...(global flags)
+        operative mode determine if delete,play,add to SelectedVids...(global flags)
     """
-    global SelectedList,btns
+    global SelectedVids,btns
     global PlayMode, SegSelectionMode, SegSelectionTimes,InfoAdd,\
-             RemoveModeEnable, DeleteGroupKeepOne
+             SelTAG,RemoveModeEnable, DeleteGroupKeepOne
+
+    currentTotSelection=unrollDictOfList(SelectedVids)
+    currentSelTag=SelTAG.get().strip()
+    if currentSelTag not in SelectedVids: SelectedVids[currentSelTag]=list()
 
     button=btns[selected.nameID]
-    print("selected\t:",selected,"current tot selection:",len(SelectedList))
-
+    print("\n:>>selected\t:",selected,"currentSelTag:",currentSelTag,\
+        "currentTotSelection:",len(currentTotSelection))
+    if CONF["DEBUG"]: print(SelectedVids)
     if PlayMode.get():
         target=selected.pathName
         if PLAY_SEGS_FIRST and len(selected.segPaths)>0: 
@@ -81,8 +88,8 @@ def _select(selected):
 
     if RemoveModeEnable.get(): #remove the selection
         remTarget=[selected]
-        if DeleteGroupKeepOne.get() and len(SelectedList)>1: 
-            remTarget=SelectedList
+        if DeleteGroupKeepOne.get() and len(currentTotSelection)>1: 
+            remTarget=currentTotSelection
             remTarget.append(selected)
             ## swap the largest selected element at the first position
             maxItemIdx,maxSize=0,remTarget[0].sizeB
@@ -100,9 +107,9 @@ def _select(selected):
                 button.config(state="disabled")
             del(button,btns[t.nameID],t)
 
-        if DeleteGroupKeepOne.get(): SelectedList=list()
+        if DeleteGroupKeepOne.get(): SelectedVids.clear()
         return
-    #not append to SelectedList exec paths terminate here
+    #not append to SelectedVids exec paths terminate here
 
     if len(selected.trimCmds)>0 and len(SegSelectionTimes.get().strip())==0:
         SegSelectionTimes.insert(0,selected.trimCmds[-1]) #add show trim cmd 
@@ -119,27 +126,29 @@ def _select(selected):
         trimPoints=trimSegCommand(selected,SegSelectionTimes.get().strip(),newCmdOnErr=False)
 
         if len(trimPoints)>0:
-            SelectedList.append(selected)
+            SelectedVids[currentSelTag].append(selected)
             print("cut commands:",selected.trimCmds,"cut points:",selected.cutPoints,sep="\n")
             button.flash()
             btnSel(button,"blue")
+        else: pass #TODO MESSAGE BOX WARNING ERR TRIMMING
         return
 
-    if selected in SelectedList:# and len(selected.cutPoints)==0:#already selected in normalmode
-        SelectedList.remove(selected)
+    if selected in currentTotSelection: #rem already selected stuff
+        for l in SelectedVids.values():
+            if selected in l: l.remove(selected)
         print("Already selected so popped: ", selected)
         button.flash();button.flash()
         btnOff(button)
         return
     else: 
-        SelectedList.append(selected)
-        btnSel(button)
+        SelectedVids[currentSelTag].append(selected)
+        btnSel(button,getTagColor(currentSelTag))
 
 
 
-def _flushSelectedItems(selected=SelectedList,logFile=SELECTION_LOGFILE):
-    global SelectedList,btns
-    
+def _flushSelectedItems(logFile=SELECTION_LOGFILE):
+    global SelectedVids,btns
+    selected=unrollDictOfList(SelectedVids)
     if len(selected)==0:    print("nothing selected!!",file=stderr);return
     cumulSize,cumulDur= 0,0
     toTrim  =[i for i in selected if len(i.cutPoints)>0]
@@ -149,25 +158,29 @@ def _flushSelectedItems(selected=SelectedList,logFile=SELECTION_LOGFILE):
     #write selected
     if logFile!=None:
         selectionLogFile=logFile+ctime().replace(" ", "_")
-        selectionInfos="# cumulSize: "+str(cumulSize / 2**20)+" MB "+"\t#cumulDur:"+str(cumulDur/60)+" min\n"
-        f = open(selectionLogFile,"w")
-        f.writelines([i.pathName+"\n" for i in selected if len(i.cutPoints)==0])
+        if len(toTrim)>0:
+            GenTrimReencodinglessScriptFFmpeg(toTrim,outFname=selectionLogFile)
+
+        selectionInfos="\n# cumulSize: "+str(cumulSize / 2**20)+" MB "+"\t#cumulDur:"+str(cumulDur/60)+" min\n"
+        f = open(selectionLogFile,"a")
+        if len(toTrim)>0: f.write("\n\n\n##Selection not to trim")
+        for tag,selList in SelectedVids.items():
+            f.write(tag+"\n")
+            f.writelines([i.pathName+"\n" for i in selList if len(i.cutPoints)==0])
         f.write(selectionInfos)
         f.close()
-        if len(toTrim)>0: 
-            GenTrimReencodinglessScriptFFmpeg(toTrim,outFname=selectionLogFile)
     print(selectionInfos)
     printList(selected)
     if len(toTrim)>0:
         print("trim script",GenTrimReencodinglessScriptFFmpeg(toTrim),sep="\n\n")
 
     #clear selected
-    for i in SelectedList: #de highlight buttons margins
+    for i in selected:
         try:    #old page's button have been already destroied
             button=btns[i.nameID]
             btnOff(button) #hide deletted item's btn
         except:pass
-    SelectedList.clear()
+    SelectedVids.clear()
 
 
 class VerticalScrolledFrame(tk.Frame):
@@ -247,7 +260,6 @@ def update(gifs,root):
         g.frameIdxRef[0]=(frameIdx+1)%framesN
         g.showObj[0].configure(image=frame)
         
-        if CONF["DEBUG"]:   print("showObj id:",id(g.showObj[0]))
     if CONF["AUDIT_PERF"]: end=perf_counter();print("gifs reDrwaw in:",end-start)
     root.after(CONF["GIF_UPDATE_POLL"], update,gifs,root)
 
@@ -278,10 +290,11 @@ def _drawPage(items, drawGif, root, decresePgN=False, pageNumber=None):
     #stub to draw a page of items,
     
     global NextPGN,sFrame,  nextPage
+    lastPgN=ceil(len(items) / CONF["GUI_ITEMS_LIMIT"] )
     if pageNumber!=None: NextPGN=pageNumber
     if decresePgN: 
         NextPGN-=2  #-1 to return to already shown page, -1 to target prev pg
-        if NextPGN<0: NextPGN= len(items) // CONF["GUI_ITEMS_LIMIT"]
+        if NextPGN<0: NextPGN=lastPgN
 
     #delete previous scroll frame
     #(global because this stub is linked to a btn -> woud always pass the same ref)
@@ -300,8 +313,8 @@ def _drawPage(items, drawGif, root, decresePgN=False, pageNumber=None):
     print("drawed page Num:", NextPGN,"on frame with id:", id(sFrame))
 
     if not decresePgN:  NextPGN += 1
-    if NextPGN*CONF["GUI_ITEMS_LIMIT"]> len(items): NextPGN = 1 #ring linked pages 
-    nextPage.configure(text="nextPage: "+str(NextPGN))
+    if NextPGN*CONF["GUI_ITEMS_LIMIT"]>len(items): NextPGN = 1 #ring linked pages 
+    nextPage.configure(text="nextPage: "+str(NextPGN)+"/"+str(lastPgN))
 
 
 def drawItems(items,drawGif,mainFrame):
@@ -376,7 +389,8 @@ def drawItems(items,drawGif,mainFrame):
         if col >= colSize:
             col = 0
             row += 1
-        if item in SelectedList: btnSel(btn)#highlight items previously selected
+        for tag,selList in SelectedVids.items():
+            if item in selList: btnSel(btn,getTagColor(tag))#color items prev.selected
 
     end=perf_counter()
     print("drawed: ",max(len(gifs),len(imgs)),"in secs: ",end-start)
@@ -399,10 +413,10 @@ def itemsGridViewStart(itemsSrc,subWindow=False,drawGif=False,sort="size"):
         if root not exist, will be created as a standard empty window
     @drawGif: draw gif instead of img 
     @sort: items sorting, either: duration,size,sizeName,shuffle,nameID
-    When tkinter root closed, Returns SelectedList of items
+    When tkinter root closed, Returns SelectedVids of items
     """
-    global nextPage, items, RemoveModeEnable,SelectedList
-    global PlayMode, SegSelectionMode, SegSelectionTimes,InfoAdd, DeleteGroupKeepOne,GifsUpdate
+    global nextPage, items, RemoveModeEnable,SelectedVids
+    global PlayMode, SegSelectionMode, SegSelectionTimes,InfoAdd,SelTAG, DeleteGroupKeepOne,GifsUpdate
     
     #get the gui tkinter container window for the element to grid inside
     root=None
@@ -461,6 +475,10 @@ def itemsGridViewStart(itemsSrc,subWindow=False,drawGif=False,sort="size"):
     SegSelectionTimes.insert(0, "start 10 20 ringrange 40 2 start 100 296 hole 155 175")
     SegSelectionTimes.grid(row=2, column=1)
     
+    SelTAG= tk.Entry(containerFrame,width=3)
+    SelTAG.insert(0, "DFLT_TAG")
+    SelTAG.grid(row=3, column=0)
+    
     InfoAdd= tk.Entry(containerFrame,width=len(DEFAULT_VID_INFOADD_STRING))
     InfoAdd.insert(0, DEFAULT_VID_INFOADD_STRING)
     InfoAdd.grid(row=2, column=2)
@@ -469,8 +487,9 @@ def itemsGridViewStart(itemsSrc,subWindow=False,drawGif=False,sort="size"):
     __restartGifsUpdate=partial(_restartGifsUpdate,root)
     def radioTogglePlay_Gifs(): #exclusive gifsUpdate - playMode
         GifsUpdate.set(value=not PlayMode.get());__restartGifsUpdate()
-        if PLAY_SELECTION_CUMULATIVE and PlayMode.get(): 
-            play(" ".join([x.pathName for x in SelectedList]))
+        currentSelTag=SelTAG.get().strip()
+        if PLAY_SELECTION_CUMULATIVE and PlayMode.get() and currentSelTag in SelectedVids:
+            play(" ".join([x.pathName for x in SelectedVids[currentSelTag]]))
 
     playModeEnable= tk.Checkbutton(containerFrame, text="playMode",variable=PlayMode,\
         command=radioTogglePlay_Gifs,background="white")
@@ -483,7 +502,7 @@ def itemsGridViewStart(itemsSrc,subWindow=False,drawGif=False,sort="size"):
     remMode.grid(row=1,column=2)
     delGroup= tk.Checkbutton(containerFrame, text="DelGroupKeepOne",variable=DeleteGroupKeepOne)
     delGroup.grid(row=1,column=3)
-    remSel=partial(_removeSelected,SelectedList)
+    remSel=partial(_removeSelected,SelectedVids)
     delSelection=tk.Button(containerFrame,command=remSel, text="DEL_SELECTED",background="red")
     delSelection.grid(row=1, column=4)
 
@@ -492,16 +511,16 @@ def itemsGridViewStart(itemsSrc,subWindow=False,drawGif=False,sort="size"):
     nextPg()
     if not subWindow: root.mainloop()
 
-    return SelectedList
+    return SelectedVids
 
 def guiMinimalStartGroupsMode(groups,trgtAction=itemsGridViewStart,trgtActionExtraArgs=[],startSearch=".",sortOnGroupLen=True):
     """ @groups: dict of k-->itemsGroup to show on selection,
         @trgtAction: func to call on group select: items,[extraArgs] -> display
         @trgtActionExtraArgs: args to unpack & pass to @trgtAction after items
 
-        When tkinter root closed, Returns SelectedList of items
+        When tkinter root closed, Returns SelectedVids of items
     """
-    global nextPage,SelectedList
+    global nextPage,SelectedVids
     
     rootTk=tk.Tk()
 
@@ -535,7 +554,7 @@ def guiMinimalStartGroupsMode(groups,trgtAction=itemsGridViewStart,trgtActionExt
         tk.Button(ScrolledFrameGroup.interior, text=groupBtnTxt,command=gotoGroup).grid()
 
     rootTk.mainloop()
-    return SelectedList
+    return SelectedVids
 
 def argParseMinimal(args):
     # minimal arg parse use to parse optional args

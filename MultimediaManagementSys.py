@@ -162,14 +162,14 @@ def SerializeSelection(selectedItems, filename=None,toTuple=True): #TODO __dict_
     return serialization
 
 
-def deserializeSelection(dumpFp,backupCopyPath="/tmp/selectionBackup.json"):
-    """ deserialize json list vid itemas as namedtuple 
+def deserializeSelection(dumpFp,backupCopyPath=None):
+    """ deserialize json list vid items as namedtuple 
 		if backupCopyPath != None: save a copy of dumpFp to backupCopyPath
 	"""
     serializedStr=dumpFp.read()
     serialized=loads(serializedStr)
     out=[VidTuple(*x) for x in serialized]
-    if backupCopyPath: open(backupCopyPath,"w").write(serializedStr)
+    if backupCopyPath!=None: open(backupCopyPath,"w").write(serializedStr)
     return out
 
 
@@ -516,7 +516,8 @@ def _printCutPoints(cutPoints):  # print cutPoints as string vaild for  TrimSegm
 
 trimSelectionPrompt="SKIP || QUIT || DEL || start START_TIME[,END_TIME] || ringRange ringCenter,[radiousNNDeflt] || hole HOLESTART HOLEEND\n\n"
 timeStrToNumeric=lambda s: s.replace(".","").replace(":","")
-def trimSegCommand(vid,cmd,start=0,end=None,newCmdOnErr=True,overwriteCutPoints=True,backUpCmdsFile="/tmp/trimCmds.string"):
+def trimSegCommand(vid,cmd,start=0,end=None,newCmdOnErr=True,\
+    overwriteCutPoints=True,backUpCmdsFile="/tmp/trimCmds.string"):
     """ 
     parse @cmd to trim @vid, writing cutPoints field inplace
     @Returns: cutPoints added to vid
@@ -526,7 +527,8 @@ def trimSegCommand(vid,cmd,start=0,end=None,newCmdOnErr=True,overwriteCutPoints=
     if @newCmdOnErr a new cmd will be prompted
 
     possible commands (short version with the first letter of the commands below)
-    start startTime[,endTime] -> just add a segment of the given next times (if not endTime use @end)
+    start startTime[,endTime] -> just add a segment of the given next times 
+        (if not endTime use @end->dflt)
     ringrange ringCenter[,radious] -> add a segment of ringCenter-radious,ringCenter+radious
     hole hStart,hEnd->take the last selected segment (whole,dflt bounded, vid if not any) 
                       and remove an hole creating 2 segs [lSegStart:hStart] [hEnd:lSegEnd]
@@ -575,6 +577,7 @@ def trimSegCommand(vid,cmd,start=0,end=None,newCmdOnErr=True,overwriteCutPoints=
                 fields=input("re-enter a valid trim command:\n"+trimSelectionPrompt).split()
                 play(vid,CONF["PLAY_CMD"])
                 replay=True
+            else:   segmentationPoints=list() #don't leave partial change
 
     #backup the cmds 
     try:
