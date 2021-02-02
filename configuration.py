@@ -80,7 +80,7 @@ VIDEO_MULTIMEDIA_EXTENSION = ["mp4", "wmw"]
 METADATA_EXTENSION = "json"
 
 REGEX_VID_SEGMENT=".*\.mp4\.[0-9]+\.mp4"
-TMP_FULLVID_PATH_CUTS="/tmp/NO_FULLVIDEO.mp4"
+TMP_NOFULLVID="/tmp/NO_FULLVIDEO.mp4"
 
 ##SCAN FOR VIDS
 envConfig(CONF,"SAVE_GENERATED_METADATA",True) #save newly generated vids metadata
@@ -103,10 +103,10 @@ envConfig(CONF,"DISABLE_GUI",False)
 BTN_SELECTED_THICKNESS=4
 BTN_NN_SELECTED_THICKNESS=1
 envConfig(CONF,"GUI_COLSIZE",6)
-lim=envConfig(CONF,"GUI_ITEMS_LIMIT",55)#max items 4 page (tkinter own limit~200)
+lim=envConfig(CONF,"GUI_ITEMS_LIMIT",18)
 lim-=lim%CONF["GUI_COLSIZE"]#end page with a full row
 CONF["GUI_ITEMS_LIMIT"]=lim
-
+print("GUI_ITEMS_LIMIT",CONF["GUI_ITEMS_LIMIT"])
 THRESHOLD_KEY_PRINT=250  #max chars to show in a button
 PLAY_SEGS_FIRST=True #if founded segments avail, play them before the full vid
 PLAY_SELECTION_CUMULATIVE=True #if something selected, add to the play queue
@@ -118,7 +118,7 @@ font = ("Arial", 15, "bold") #btn text font
 #gif
 envConfig(CONF,"MAX_FRAME_N",200)    #max gifs frame to considered 
 #(too mutch frames for too mutch items per page && fewRAM avail => SIGTERM TODO OOMkiller?
-envConfig(CONF,"GIF_UPDATE_POLL",96)
+envConfig(CONF,"GIF_UPDATE_POLL",123)
 envConfig(CONF,"DRAW_GIF",True)
 envConfig(CONF,"NameIdFirstDot",True)#extract nameID as pathname[:first dot]
 

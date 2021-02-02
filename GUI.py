@@ -49,10 +49,10 @@ stopGifsUpdate=False #set to true when to stop the gifs update
 ###button logics
 def _removeSelected(rmDict=SelectedVids):
     global SelectedVids,btns
-    if not messagebox.askyesno('REMOVE ALL '+\
-        str(len(unrollDictOfList(rmDict)),'Del?',icon='warning')): return
-    for i in unrollDictOfList(rmDict):
-        if not remove(i): continue #not removed
+    toRemove=unrollDictOfList(rmDict)
+    if not messagebox.askyesno('REMOVE '+str(len(toRemove)),'Del?',icon='warning'): return
+    for i in toRemove:
+        if not remove(i): continue
         try:
             btn=btns[i.nameID]
             btnOff(btn)
@@ -60,7 +60,7 @@ def _removeSelected(rmDict=SelectedVids):
             del(i,btn,btns[i.nameID])
         except: pass
 
-    SelectedVids.clear()
+    rmDict.clear()
    
 def _select(selected):
     """
@@ -149,7 +149,7 @@ def _select(selected):
 def _flushSelectedItems(logFile=SELECTION_LOGFILE):
     global SelectedVids,btns
     selected=unrollDictOfList(SelectedVids)
-    if len(selected)==0:    print("nothing selected!!",file=stderr);return
+    if len(selected)==0:    print(CRED,"nothing selected!!",CEND,file=stderr);return
     cumulSize,cumulDur= 0,0
     toTrim  =[i for i in selected if len(i.cutPoints)>0]
     
@@ -245,7 +245,7 @@ def getFrames(gifPath,max_frame_n=CONF["MAX_FRAME_N"]):
             gif.seek(x+1)
     except EOFError: pass #reached EOF file
     except Exception as e:
-           print("getFrames",e,file=stderr)
+           print(CRED,"getFrames",e,CEND,file=stderr)
     return frames
     
 
@@ -364,8 +364,8 @@ def drawItems(items,drawGif,mainFrame):
         if item.sizeB != 0:         txt += "\nsize:\t" + str(item.sizeB/2**20)[:6]+"MB"
         if len(item.cutPoints)> 0:  #truncate cutpoints embedded in vid item
             cutStr=str(item.cutPoints).replace(" ","").replace("],"," ").replace(",","-").replace("[","").replace("]","").replace("'","")
-            txt += "\ncuts#="+str(len(item.cutPoints))+\
-                    truncString(": "+cutStr,14,suffixPatternToShowSep=None)
+            txt += "\ncuts#="+str(len(item.cutPoints))
+                    #+truncString(": "+cutStr,14,suffixPatternToShowSep=None)
         if len(item.info[0])>0:    txt+="\n"+truncString(item.info[0],suffixPatternToShowSep=None)
         elif len(item.segPaths)> 0:  txt+="\nSegsReady#="+str(len(item.segPaths))+backupCmds
         elif len(item.trimCmds)> 0:  txt+=backupCmds
@@ -464,7 +464,7 @@ def itemsGridViewStart(itemsSrc,subWindow=False,drawGif=False,sort="size"):
     sortItems=partial(_sortItems,items,sortMethod,drawGif,root)
     sortComboChoice=ttk.Combobox(containerFrame,textvar=sortMethod)
     sortComboChoice.bind("<<ComboboxSelected>>", sortItems)
-    sortComboChoice["values"]=["duration","size","sizeName","nameID","shuffle"]
+    sortComboChoice["values"]=["duration","size","sizeName","nameID","segsReady&Size","shuffle"]
     sortComboChoice.grid(row=0,column=3)
 
     segSelectionEnable = tk.Checkbutton(containerFrame, text="segmentSelMode",\
@@ -488,8 +488,8 @@ def itemsGridViewStart(itemsSrc,subWindow=False,drawGif=False,sort="size"):
     def radioTogglePlay_Gifs(): #exclusive gifsUpdate - playMode
         GifsUpdate.set(value=not PlayMode.get());__restartGifsUpdate()
         currentSelTag=SelTAG.get().strip()
-        if PLAY_SELECTION_CUMULATIVE and PlayMode.get() and currentSelTag in SelectedVids:
-            play(" ".join([x.pathName for x in SelectedVids[currentSelTag]]))
+        if PLAY_SELECTION_CUMULATIVE and PlayMode.get() and len(SelectedVids)>0:
+            play(" ".join(unrollDictOfList(SelectedVids))) #play all selected
 
     playModeEnable= tk.Checkbutton(containerFrame, text="playMode",variable=PlayMode,\
         command=radioTogglePlay_Gifs,background="white")
@@ -618,6 +618,8 @@ if __name__ == "__main__":
     if args.whitelistPaths!=None:
         itemsFull=items
         items=ItemsNamelistRestrict(items,args.whitelistPaths)
+
+    for i in items: assert i.gifPath!=None
         
     ##selection mode
     if args.selectionMode=="GROUPS":

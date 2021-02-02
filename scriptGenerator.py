@@ -44,8 +44,8 @@ def GenTrimReencodinglessScriptFFmpeg(items, accurateSeek=False, outFname=None,
     outLines = list()
     outLines.append("mkdir -p "+dstCutDir+" \n")
 
-    outLines.append("#ffmpegBin='~/ffmpeg' #/home/andysnake/ffmpeg/bin/nv/ffmpeg_g #custom ffmpeg\n")
-    outLines.append("ffmpegBin="+CONF["FFMPEG"]+"\n")
+    outLines.append("ffmpegBin='~/ffmpeg' #/home/andysnake/ffmpeg/bin/nv/ffmpeg_g #custom ffmpeg\n")
+    outLines.append("#ffmpegBin="+CONF["FFMPEG"]+"\n")
     outLines.append("ffmpegBin+=\" -loglevel error -hide_banner -n \"  \n")
     outLines.append("if [[ $FFMPEG ]];then ffmpegBin=$FFMPEG;fi\n")
     for i in items:
@@ -54,8 +54,8 @@ def GenTrimReencodinglessScriptFFmpeg(items, accurateSeek=False, outFname=None,
         cutPointsNum = len(i.cutPoints)
         if cutPointsNum == 0: continue 
         #information headers
-        outLines.append("\n#SEGMENTS OF " + i.pathName +" \t"+ str(i.duration/60)+"mins \n")  
-        outLines.append("\n#cut cmds: "+str(i.trimCmds)+"\n")
+        outLines.append("\n#SEGMENTS OF " + i.pathName +"\t"+ str(i.duration/60)+"mins \n")
+        outLines.append("\n#cut cmds: "+str(i.trimCmds)+"\t"+"res. cutPoints\t"+str(i.cutPoints)+"\n")
         
         # for each segments embedded generate ffmpeg -ss -to -i vid.pathName -c copy ...
         ffmpegInputPath = " -i '" + i.pathName+"' "
@@ -73,10 +73,10 @@ def GenTrimReencodinglessScriptFFmpeg(items, accurateSeek=False, outFname=None,
             trimSegCmd+=dstPaths[s]
             outLines.append(trimSegCmd + "&& echo success done seg:"+str(s)+"\n")
         outLines.append("#rm " + i.pathName + "\n"+"#"*22+"\n")  # commented remove cmd for currnt vid
-        #prepare a concat file and command for merging just the trimmed segs
+        #embed a concat file and command for merging just the trimmed segs
         outLines.append("#concat.list\n")
         outLines.append("#file "+"\n#file ".join(dstPaths))
-        outLines.append("#eval $ffmpegBin -f concat -i concat.list -c copy "+cutSubDir+i.pathName.split("/")[-1]+ ".cutsALL.mp4")
+        outLines.append("#eval $ffmpegBin -f concat -i concat.list -c copy "+cutSubDir+i.pathName.split("/")[-1]+ ".CONCAT.mp4\n")
 
     if outFname != None:
         fp = open(outFname, "a")

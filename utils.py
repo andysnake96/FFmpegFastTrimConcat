@@ -184,8 +184,9 @@ def vidItemsSorter(itemsSrc, sortMethod):
     elif sortMethod == "sizeName":
         itemsSrc.sort(key=lambda x: (x.nameID, int(x.sizeB)), reverse=True)
 
-    elif sortMethod == "nameID": itemsSrc.sort(key=lambda x: x.nameID)
-    elif sortMethod == "shuffle":shuffle(itemsSrc)
+    elif sortMethod == "nameID":    itemsSrc.sort(key=lambda x: x.nameID)
+    elif sortMethod == "segsReady&Size": itemsSrc.sort(key=lambda x: (len(x.segPaths),x.sizeB),reverse=True)
+    elif sortMethod == "shuffle":   shuffle(itemsSrc)
     else:raise Exception("not founded sorting method")
 
 ##support var
@@ -237,13 +238,18 @@ if __name__=="__main__":
         try: f()
         except: print()
 
+##COLORED TERM TEXT
+CRED= '\33[31m';CBLUEBG= '\33[44m';CEND= '\33[0m';CBOLD= '\33[1m'
+BEST_HIGHLIGHT=CRED+CBOLD+CBLUEBG
+#print highlighted @s [dflt red color font]
+hlTermPrint=lambda s,prefix=CRED,file=stderr: print(prefix+s+CEND,file=file) 
 #var
 printList = lambda l: list(map(print, l))  # basic print list, return [None,...]
 TKINTER_COLORS= ['snow', 'ghost white', 'white smoke', 'gainsboro', 'floral white', 'old lace',
     'linen', 'antique white', 'papaya whip', 'blanched almond', 'bisque', 'peach puff',
     'navajo white', 'lemon chiffon', 'mint cream', 'azure', 'alice blue', 'lavender',
     'lavender blush', 'misty rose', 'light grey', 'midnight blue', 'navy', 'cornflower blue', 'dark slate blue',
-    'slate blue', 'medium slate blue', 'light slate blue', 'medium blue', 'royal blue',  'blue',
+    'slate blue', 'medium slate blue', 'light slate blue', 'medium blue', 'royal blue',
     'dodger blue', 'deep sky blue', 'sky blue', 'light sky blue', 'steel blue', 'light steel blue',
     'light blue', 'powder blue', 'pale turquoise', 'dark turquoise', 'medium turquoise', 'turquoise',
     'cyan', 'light cyan', 'cadet blue', 'medium aquamarine', 'aquamarine', 'dark green', 'dark olive green',
@@ -301,4 +307,4 @@ TKINTER_COLORS= ['snow', 'ghost white', 'white smoke', 'gainsboro', 'floral whit
     'MediumOrchid4', 'DarkOrchid1', 'DarkOrchid2', 'DarkOrchid3', 'DarkOrchid4',
     'purple1', 'purple2', 'purple3', 'purple4', 'MediumPurple1', 'MediumPurple2',
     'MediumPurple3', 'MediumPurple4', 'thistle1', 'thistle2', 'thistle3', 'thistle4',"black"]
-
+shuffle(TKINTER_COLORS)

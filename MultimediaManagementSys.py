@@ -79,10 +79,10 @@ class Vid:
         self.date=None  #vid file last access date TODO UNBINDED
 
     def __str__(self):
-        outS="Item: id:"+self.nameID+" path: " + truncString(self.pathName) + \
-            "size: " + str(self.sizeB) + " imgPath: " + truncString(self.imgPath)
-        if self.gifPath!=None: outS+=" gifPath: "+truncString(self.gifPath)
-        if not CONF["AUDIT_VIDINFO"]: outS="Item: "+ self.nameID
+        outS="id:"+self.nameID+" path: " + self.pathName + "\n"+\
+             str(self.segPaths) +" size: " + str(self.sizeB) #+ " imgPath: " + truncString(self.imgPath)
+        if self.gifPath!=None: outS+=" gif "+self.gifPath!=None
+        if not CONF["AUDIT_VIDINFO"]: outS="Item: "+ self.nameID+" "+self.pathName
         return outS
 
     def genMetadata(self):
@@ -125,6 +125,7 @@ vidNamedTuple2Obj=lambda trgt: Vid().fromJson(trgt._asdict(), False)
 def play(vidPath, playBaseCmd=CONF["PLAY_CMD"]):
     """play the given Vids with playBaseCmd 
        vids may be a single path or space separated pathnames of vids """
+    vidPath=vidPath.replace(TMP_NOFULLVID,"") #remove dummy path if any
     cmd = playBaseCmd+" "+vidPath
     print("to play: ", cmd)
     #out = Popen(cmd.split(), stderr=DEVNULL, stdout=DEVNULL)
@@ -135,7 +136,7 @@ def remove(vid, confirm=True):
     #remove this item, if confirm ask confirmation onthe backed terminal
     #return True if item actually removed
     targets=[x for x in [vid.pathName,vid.imgPath,vid.metadataPath,vid.gifPath] if x != None]
-    if len(vid.segPaths)>0:targets=[vid.pathName] #don't remove metad. to show segs 
+    if len(vid.segPaths)>0: targets=[vid.pathName] #don't remove metad. to show segs 
     cmd = "rm "+" ".join(targets)
     if confirm and "Y" in input(cmd+" ???(y||n)\t").upper():
         # out = Popen(cmd.split(), stderr=DEVNULL, stdout=DEVNULL).wait()
@@ -322,20 +323,20 @@ def ScanItems(rootPath=".", vidItems=dict(), PATH_ID=False,forceMetadataGen=CONF
                 for ext in VIDEO_MULTIMEDIA_EXTENSION:
                     if ext in extension: notHandledExt=False;break
                 if notHandledExt:
-                    print("not handled extension",extension,item,file=stderr)
+                    print(CRED,"not handled extension",extension,item,CEND,file=stderr)
                     continue
                 
                 if item.pathName != None: 
-                    print("already founded a vid with same nameID",item.nameID,item.pathName,\
-                        fpath," ... overwriting pathName",file=stderr);doubleCounter+=1
+                    print("already founded a vid with same nameID",item.pathName,\
+                        fpath," ... overwriting ",file=stderr);doubleCounter+=1
                 isSegment=False
                 if search(REGEX_VID_SEGMENT,fpath) == None: #normal vid
                     item.pathName = fpath
                     item.extension=extension
                 else:   #segment trimmed file
-                    print(fpath)
+                    if AUDIT_DSCPRINT:print("segment of",item.nameID,"at:",fpath)
                     #set "fullvideo" path to a tmp fake path, to avoid later filtering
-                    if item.pathName==None: item.pathName=TMP_FULLVID_PATH_CUTS
+                    if item.pathName==None: item.pathName=TMP_NOFULLVID
                     if lastPartPath(fpath) in [lastPartPath(f) for f in item.segPaths]:
                         print("segment",fpath," already included...",item.segPaths)
                         continue
@@ -473,13 +474,12 @@ def FilterItems(items, pathPresent=True,tumbnailPresent=False,gifPresent=False,\
                 and (not durationPos or i.duration>0)
         #audit missing fields for manual operations
         if CONF["AUDIT_MISSERR"] or (not CONF["QUIET"] and not keep):
-            if i.pathName == None:print("missing pathName at",i.nameID,file=stderr);continue
-            if i.imgPath == None and i.gifPath == None: #if at least one of them is fine
-                if i.imgPath == None : print("Missing thumbnail at \t", i.pathName,file=stderr)
-                if i.gifPath == None:  print("Missing gif at \t", i.pathName,file=stderr)
+            if i.pathName == None:  print("missing pathName at",i.nameID,file=stderr);continue
+            #if i.imgPath == None : print("Missing thumbnail at \t", i.pathName,file=stderr)
+            if i.gifPath == None: hlTermPrint("missing gif but vid ok\t"+i.pathName,CRED+CBOLD)
             if i.metadata==None:  print("None metadata", i.metadataPath, file=stderr)
             elif i.duration <= 0 and i.metadataPath != None:
-                print("invalid duration", i.duration, i.metadataPath, file=stderr)
+                hlTermPrint("invalid duration"+str(i.duration)+i.metadataPath)
 
         if len(keepNIDS)>0 and i.nameID not in keepNIDS:
             if CONF["DEBUG"]:print("filtered ",i,"not in nameID s whitelist")
@@ -645,7 +645,7 @@ def TrimSegmentsIterative(itemsList, skipNameList=None, dfltStartPoint=0, dfltEn
 def argParseMinimal(args):
     # minimal arg parse use to parse optional args
     parser = ArgumentParser(
-        description=__doc__ + '\nMagment of vid clips along with their metadata and tumbnails with an optional minimal GUI')
+        description=BEST_HIGHLIGHT+__doc__ + '\nMagment of vid clips along with their metadata and tumbnails with an optional minimal GUI'+CEND)
     parser.add_argument("pathStart", type=str, help="path to start recursive search of vids")
 
     parser.add_argument("--operativeMode", type=str, default="ITERATIVE_TRIM_SELECT",choices=["ITERATIVE_TRIM_SELECT","CONVERT_SELECTION_FILE_TRIM_SCRIPT"],
