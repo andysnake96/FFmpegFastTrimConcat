@@ -334,7 +334,7 @@ def ScanItems(rootPath=".", vidItems=dict(), PATH_ID=False,forceMetadataGen=CONF
                     item.pathName = fpath
                     item.extension=extension
                 else:   #segment trimmed file
-                    if AUDIT_DSCPRINT:print("segment of",item.nameID,"at:",fpath)
+                    if CONF["AUDIT_DSCPRINT"]:print("segment of",item.nameID,"at:",fpath)
                     #set "fullvideo" path to a tmp fake path, to avoid later filtering
                     if item.pathName==None: item.pathName=TMP_NOFULLVID
                     if lastPartPath(fpath) in [lastPartPath(f) for f in item.segPaths]:

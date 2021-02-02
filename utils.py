@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 ###Vid metadata gen--parse
-from configuration import CONF
+from configuration import CONF,TMP_NOFULLVID
 
 from json import load, loads, dumps
 from multiprocessing.dummy import Pool
@@ -179,10 +179,11 @@ def drawSegmentsTurtle(itemSegmentList, SCREEN_W=400, LINE_WIDTH_SEG=3, SEGS_FNA
 def vidItemsSorter(itemsSrc, sortMethod):
     if sortMethod == "duration":
         itemsSrc.sort(key=lambda x: float(x.duration), reverse=True)
+    #size sort down to 0 if NO FULL VIDEO AVAIBLE 
     elif sortMethod == "size":
-        itemsSrc.sort(key=lambda x: int(x.sizeB), reverse=True)
+        itemsSrc.sort(key=lambda x: x.sizeB-x.sizeB*x.pathName.count(TMP_NOFULLVID), reverse=True)
     elif sortMethod == "sizeName":
-        itemsSrc.sort(key=lambda x: (x.nameID, int(x.sizeB)), reverse=True)
+        itemsSrc.sort(key=lambda x: (x.nameID,x.sizeB-x.sizeB*x.pathName.count(TMP_NOFULLVID)), reverse=True)
 
     elif sortMethod == "nameID":    itemsSrc.sort(key=lambda x: x.nameID)
     elif sortMethod == "segsReady&Size": itemsSrc.sort(key=lambda x: (len(x.segPaths),x.sizeB),reverse=True)

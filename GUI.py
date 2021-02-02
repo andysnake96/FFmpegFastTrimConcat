@@ -290,14 +290,14 @@ def _drawPage(items, drawGif, root, decresePgN=False, pageNumber=None):
     #stub to draw a page of items,
     
     global NextPGN,sFrame,  nextPage
-    lastPgN=ceil(len(items) / CONF["GUI_ITEMS_LIMIT"] )
+    lastPgN=ceil(len(items)/CONF["GUI_ITEMS_LIMIT"])-1 #starting from 0
     if pageNumber!=None: NextPGN=pageNumber
     if decresePgN: 
         NextPGN-=2  #-1 to return to already shown page, -1 to target prev pg
         if NextPGN<0: NextPGN=lastPgN
 
     #delete previous scroll frame
-    #(global because this stub is linked to a btn -> woud always pass the same ref)
+    #(global because this stub is linked to a btn -> would always pass the same ref)
     try:
         for c in sFrame.childs:
             c.destroy; del c
@@ -308,12 +308,13 @@ def _drawPage(items, drawGif, root, decresePgN=False, pageNumber=None):
     #create a new context to draw items
     sFrame=VerticalScrolledFrame(root)
     sFrame.grid() #(row=1,column=0)
-
-    drawItems(items[NextPGN * CONF["GUI_ITEMS_LIMIT"]:(NextPGN + 1) * CONF["GUI_ITEMS_LIMIT"]], drawGif, sFrame)
-    print("drawed page Num:", NextPGN,"on frame with id:", id(sFrame))
-
-    if not decresePgN:  NextPGN += 1
-    if NextPGN*CONF["GUI_ITEMS_LIMIT"]>len(items): NextPGN = 1 #ring linked pages 
+    
+    print("drawing  page Num:", NextPGN,"on frame with id:", id(sFrame))
+    assert NextPGN in range(0,lastPgN+1),"wrong pgN :("
+    try:drawItems(items[NextPGN*CONF["GUI_ITEMS_LIMIT"]:(NextPGN+1)*CONF["GUI_ITEMS_LIMIT"]], drawGif, sFrame)
+    except:pass
+    NextPGN += 1
+    if NextPGN*CONF["GUI_ITEMS_LIMIT"]>len(items): NextPGN = 0 #ring linked pages 
     nextPage.configure(text="nextPage: "+str(NextPGN)+"/"+str(lastPgN))
 
 
@@ -364,10 +365,13 @@ def drawItems(items,drawGif,mainFrame):
         if item.sizeB != 0:         txt += "\nsize:\t" + str(item.sizeB/2**20)[:6]+"MB"
         if len(item.cutPoints)> 0:  #truncate cutpoints embedded in vid item
             cutStr=str(item.cutPoints).replace(" ","").replace("],"," ").replace(",","-").replace("[","").replace("]","").replace("'","")
-            txt += "\ncuts#="+str(len(item.cutPoints))
-                    #+truncString(": "+cutStr,14,suffixPatternToShowSep=None)
+            #txt += "\ncuts#="+str(len(item.cutPoints))
+            #+truncString(": "+cutStr,14,suffixPatternToShowSep=None)
         if len(item.info[0])>0:    txt+="\n"+truncString(item.info[0],suffixPatternToShowSep=None)
-        elif len(item.segPaths)> 0:  txt+="\nSegsReady#="+str(len(item.segPaths))+backupCmds
+        elif len(item.segPaths)> 0:  
+            txt+="\nSegsReady#="+str(len(item.segPaths))
+            if item.pathName == TMP_NOFULLVID: txt+="\n!NO FULL VIDEO!"
+            else: txt+=backupCmds
         elif len(item.trimCmds)> 0:  txt+=backupCmds
         
         if drawGif:
@@ -396,7 +400,7 @@ def drawItems(items,drawGif,mainFrame):
     print("drawed: ",max(len(gifs),len(imgs)),"in secs: ",end-start)
     
     if drawGif :
-        assert len(gifs)>0,"empty gif set -> nothing to show!"
+        assert len(gifs)>0,"empty gif set -> nothing to show! items#"+str(len(items))
         mainFrame.interior.after_idle(update,gifs,mainFrame)
 
 
